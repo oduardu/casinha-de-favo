@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk '{print $3}')",
+      "Bash(awk '{print $2, $3, $4}')",
+      "Bash(awk 'BEGIN{minx=9999;maxx=-9999;minz=9999;maxz=-9999} {if\\($1<minx\\)minx=$1; if\\($1>maxx\\)maxx=$1; if\\($3<minz\\)minz=$3; if\\($3>maxz\\)maxz=$3} END{print \"X:\", minx, \"to\", maxx; print \"Z:\", minz, \"to\", maxz}')",
+      "Bash(awk 'BEGIN{minx=9999;maxx=-9999;miny=9999;maxy=-9999;minz=9999;maxz=-9999} {if\\($1<minx\\)minx=$1;if\\($1>maxx\\)maxx=$1;if\\($2<miny\\)miny=$2;if\\($2>maxy\\)maxy=$2;if\\($3<minz\\)minz=$3;if\\($3>maxz\\)maxz=$3} END{print \"X:\", minx, maxx, \"size:\", maxx-minx; print \"Y:\", miny, maxy, \"size:\", maxy-miny; print \"Z:\", minz, maxz, \"size:\", maxz-minz}')",
+      "Bash(awk 'BEGIN{minx=9999;maxx=-9999;minz=9999;maxz=-9999}{if\\($2<minx\\)minx=$2;if\\($2>maxx\\)maxx=$2;if\\($4<minz\\)minz=$4;if\\($4>maxz\\)maxz=$4}END{print \"X:\",minx,maxx; print \"Z:\",minz,maxz}')",
+      "Bash(awk 'BEGIN{miny=9999;maxy=-9999}{if\\($3<miny\\)miny=$3;if\\($3>maxy\\)maxy=$3}END{print \"Y:\",miny,maxy,\"height:\",maxy-miny}')",
+      "Bash(grep -E \"^[A-Za-z_][A-Za-z0-9_\\\\-\\\\.]{2,30}$\")",
+      "Bash(grep -oE '\"name\":\"[^\"]{3,30}\"')",
+      "Bash(grep -oE '\"name\":\"[^\"]{2,30}\"')",
+      "Bash(python3 -c ' *)",
+      "Bash(node -e ' *)"
+    ]
+  }
+}

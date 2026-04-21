@@ -1,0 +1,7 @@
+[gd_scene format=3 uid="uid://d0l7cg77wdh04"]
+
+[ext_resource type="Script" uid="uid://rpuao5mb4w4k" path="res://scripts/click_marker.gd" id="1"]
+
+[node name="ClickMarker" type="Node3D" unique_id=471410189]
+visible = false
+script = ExtResource("1")

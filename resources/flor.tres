@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="Item" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/item.gd" id="1_item"]
+[ext_resource type="PackedScene" path="res://obj/kenney_nature_kit/flower_yellowA.glb" id="2_modelo"]
+
+[resource]
+script = ExtResource("1_item")
+id = "flor"
+nome_exibicao = "Flor"
+empilhavel = true
+quantidade_maxima = 99
+tipo_interacao = "plantar"
+modelo_3d = ExtResource("2_modelo")

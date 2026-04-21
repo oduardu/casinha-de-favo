@@ -1,0 +1,20 @@
+[gd_scene format=3 uid="uid://ctvl7irijv3ob"]
+
+[ext_resource type="Script" uid="uid://dyryhtkvgdu4r" path="res://scripts/player.gd" id="1"]
+[ext_resource type="PackedScene" uid="uid://wj1g3gmshy8k" path="res://obj/kenney_character/character_keeper_2.tscn" id="2"]
+
+[sub_resource type="CapsuleShape3D" id="4"]
+radius = 0.3
+height = 0.9
+
+[node name="Player" type="CharacterBody3D" unique_id=1061488314]
+script = ExtResource("1")
+
+[node name="Model" parent="." unique_id=373419629 instance=ExtResource("2")]
+transform = Transform3D(-2, 0, 0, 0, 2, 0, 0, 0, -2, 0, 0, 0)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=612386112]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.75, 0)
+shape = SubResource("4")
+
+[node name="NavigationAgent3D" type="NavigationAgent3D" parent="." unique_id=319876543]

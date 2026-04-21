@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://c144jgf482lfp"]
+
+[ext_resource type="Script" uid="uid://cpojwn04wo3ja" path="res://scripts/farm_tile.gd" id="1_farmtile"]
+
+[node name="FarmTile" type="Node3D" unique_id=1796349286]
+script = ExtResource("1_farmtile")

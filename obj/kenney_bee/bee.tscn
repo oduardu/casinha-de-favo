@@ -1,0 +1,29 @@
+[gd_scene format=3 uid="uid://db6nvwv7fk16g"]
+
+[ext_resource type="PackedScene" uid="uid://cmf05emra420d" path="res://obj/kenney_bee/animal-bee.glb" id="1_24gck"]
+
+[node name="animal-bee2" unique_id=304713591 instance=ExtResource("1_24gck")]
+
+[node name="root" parent="animal-bee" parent_id_path=PackedInt32Array(1822297013) index="0" unique_id=1884251145]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.058453336, 0)
+
+[node name="body" parent="animal-bee/root" index="0" unique_id=1707155819]
+transform = Transform3D(0.9981645, -0.042802434, -0.042842947, 0.042842947, 0.99908173, 2.7358707e-05, 0.04280244, -0.0018628264, 0.9990818, 1.573182e-08, 0.18124998, -3.8083503e-08)
+
+[node name="wing-left" parent="animal-bee/root/body" index="0" unique_id=1905304303]
+transform = Transform3D(0.9771297, -0.21264383, 0, 0.21264383, 0.9771297, 0, 0, 0, 1, 0.19649982, 1.3192949, -0.022000015)
+
+[node name="wing-right" parent="animal-bee/root/body" index="1" unique_id=2040884927]
+transform = Transform3D(0.9771297, 0.21264383, 0, -0.21264383, 0.9771297, 0, 0, 0, 1, -0.19649982, 1.3192949, -0.022000015)
+
+[node name="leg-back-left" parent="animal-bee/root" index="1" unique_id=194298969]
+transform = Transform3D(1, 0, 0, 0, 0.8599116, -0.5104429, 0, 0.5104429, 0.8599116, 0.25, 0.3, -0.25)
+
+[node name="leg-back-right" parent="animal-bee/root" index="2" unique_id=720648771]
+transform = Transform3D(1, 0, 0, 0, 0.8599116, 0.5104429, 0, -0.5104429, 0.8599116, -0.25, 0.3, -0.25)
+
+[node name="leg-front-left" parent="animal-bee/root" index="3" unique_id=1336192544]
+transform = Transform3D(1, 0, 0, 0, 0.8599116, 0.5104429, 0, -0.5104429, 0.8599116, 0.25, 0.3, 0.25)
+
+[node name="leg-front-right" parent="animal-bee/root" index="4" unique_id=1450930302]
+transform = Transform3D(1, 0, 0, 0, 0.8599116, -0.5104429, 0, 0.5104429, 0.8599116, -0.25, 0.3, 0.25)

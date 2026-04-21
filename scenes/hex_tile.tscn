@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://hex_tile_scene_001"]
+
+[ext_resource type="Script" path="res://scripts/hex_tile.gd" id="1_hextile"]
+
+[node name="HexTile" type="Node3D"]
+script = ExtResource("1_hextile")

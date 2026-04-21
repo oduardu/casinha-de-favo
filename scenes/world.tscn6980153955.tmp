@@ -1,0 +1,65 @@
+[gd_scene format=3 uid="uid://b703crjewqym7"]
+
+[ext_resource type="PackedScene" uid="uid://ctvl7irijv3ob" path="res://scenes/player.tscn" id="1"]
+[ext_resource type="Script" uid="uid://pqt0jpgkem4w" path="res://scripts/camera_follow.gd" id="2"]
+[ext_resource type="PackedScene" uid="uid://dfdccr35aubx" path="res://obj/kenney_hexagonal/building-house.glb" id="7_i7141"]
+[ext_resource type="Script" uid="uid://b68acufhxx5dn" path="res://scripts/world.gd" id="9_world"]
+[ext_resource type="Script" uid="uid://cr2g0ou3j0b8g" path="res://scripts/path_visualizer.gd" id="10_pathviz"]
+[ext_resource type="PackedScene" uid="uid://cmf05emra420d" path="res://obj/kenney_bee/animal-bee.glb" id="12_bee"]
+[ext_resource type="Script" uid="uid://qnk88aefcj5p" path="res://scripts/bee.gd" id="13_bee"]
+
+[sub_resource type="Environment" id="2"]
+background_mode = 1
+background_color = Color(0.12, 0.35, 0.62, 1)
+ambient_light_source = 2
+ambient_light_color = Color(1, 1, 1, 1)
+ambient_light_energy = 0.15
+
+[sub_resource type="NavigationMesh" id="NavMesh"]
+cell_height = 0.1
+
+[node name="World" type="Node3D" unique_id=541646584]
+script = ExtResource("9_world")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=224476733]
+environment = SubResource("2")
+
+[node name="NavigationRegion3D" type="NavigationRegion3D" parent="." unique_id=1317009673]
+navigation_mesh = SubResource("NavMesh")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1869886775]
+transform = Transform3D(-0.44225743, 0.63419574, 0.63419574, 0, 0.7071068, -0.7071068, -0.89688814, -0.31272325, -0.31272325, 14.228622, 22.514278, 13.981651)
+light_color = Color(0.94152987, 1, 0.7493974, 1)
+light_energy = 1.5
+shadow_enabled = true
+shadow_bias = 0.02
+directional_shadow_max_distance = 40.0
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=386023982]
+transform = Transform3D(0.78970814, -0.1980107, 0.58064854, 0.026417343, 0.95657706, 0.29027975, -0.6129137, -0.21389712, 0.76064765, 4.5, 5.5, 7)
+projection = 1
+size = 7.0
+far = 200.0
+script = ExtResource("2")
+
+[node name="Player" parent="." unique_id=1492870774 instance=ExtResource("1")]
+
+[node name="PathVisualizer" type="Node3D" parent="." unique_id=738856423]
+script = ExtResource("10_pathviz")
+
+[node name="LineMesh" type="MeshInstance3D" parent="PathVisualizer" unique_id=431687943]
+
+[node name="ArrowMesh" type="MeshInstance3D" parent="PathVisualizer" unique_id=601897189]
+
+[node name="Bee" type="Node3D" parent="." unique_id=1305881234]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
+script = ExtResource("13_bee")
+speed = null
+radius = null
+height_range = null
+
+[node name="BeeModel" parent="Bee" unique_id=19717531 instance=ExtResource("12_bee")]
+transform = Transform3D(-0.4, 0, 0, 0, 0.4, 0, 0, 0, -0.4, 0, 0, 0)
+
+[node name="building-house2" parent="." unique_id=1906919810 instance=ExtResource("7_i7141")]
+transform = Transform3D(-1.0209423, 0, -4.894658, 0, 5, 0, 4.894658, 0, -1.0209423, 0.9019995, -0.019038677, 3.7854066)
