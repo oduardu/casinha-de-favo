@@ -15,6 +15,7 @@ var _paineis: Array[Panel] = []             # Um Panel por slot, para atualizar 
 var _icones: Array[TextureRect] = []        # TextureRect do ícone em cada slot
 var _labels_qtd: Array[Label] = []          # Label de quantidade em cada slot
 var _labels_nome: Array[Label] = []         # Label de nome do item quando não há ícone
+var _viewports_3d: Array[SubViewportContainer] = []  # SubViewportContainer para modelo 3D por slot
 
 
 func _ready() -> void:
@@ -88,7 +89,48 @@ func _criar_painel_slot(_indice: int) -> Panel:
 	painel.add_child(icone)
 	_icones.append(icone)
 
-	# Label com o nome do item — visível quando não há ícone
+	# SubViewportContainer para modelo 3D do item — visível quando há modelo_3d
+	var svc := SubViewportContainer.new()
+	svc.name = "Viewport3D"
+	svc.stretch = true
+	svc.set_anchors_preset(Control.PRESET_FULL_RECT)
+	svc.offset_left = 4
+	svc.offset_top = 4
+	svc.offset_right = -4
+	svc.offset_bottom = -14  # Espaço para label de quantidade
+	svc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	svc.visible = false
+
+	var sv := SubViewport.new()
+	sv.name = "SV"
+	sv.size = Vector2i(56, 46)
+	sv.transparent_bg = true
+	sv.render_target_update_mode = SubViewport.UPDATE_ONCE
+	sv.own_world_3d = true
+	svc.add_child(sv)
+
+	var cam := Camera3D.new()
+	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
+	cam.size = 1.6
+	cam.position = Vector3(0.0, 0.6, 2.0)
+	cam.rotation_degrees = Vector3(-15.0, 0.0, 0.0)
+	cam.far = 10.0
+	sv.add_child(cam)
+
+	var luz1 := DirectionalLight3D.new()
+	luz1.rotation_degrees = Vector3(-40.0, 30.0, 0.0)
+	luz1.light_energy = 2.0
+	sv.add_child(luz1)
+
+	var luz2 := DirectionalLight3D.new()
+	luz2.rotation_degrees = Vector3(-20.0, -60.0, 0.0)
+	luz2.light_energy = 0.8
+	sv.add_child(luz2)
+
+	painel.add_child(svc)
+	_viewports_3d.append(svc)
+
+	# Label com o nome do item — visível quando não há ícone nem modelo 3D
 	var label_nome := Label.new()
 	label_nome.name = "NomeItem"
 	label_nome.add_theme_font_size_override("font_size", 11)
@@ -141,21 +183,28 @@ func _atualizar_slot(indice: int) -> void:
 		_icones[indice].texture = null
 		_labels_nome[indice].text = ""
 		_labels_qtd[indice].text = ""
+		_limpar_viewport_3d(indice)
+		_viewports_3d[indice].visible = false
 		var estilo := _paineis[indice].get_theme_stylebox("panel") as StyleBoxFlat
 		if estilo:
 			estilo.bg_color = COR_FUNDO_SLOT
 		return
 
-	# Ícone disponível: mostra a textura; sem ícone: mostra o nome com cor de fundo
+	# Prioridade: ícone 2D → modelo 3D → nome texto
 	if slot.item.icone != null:
 		_icones[indice].texture = slot.item.icone
 		_labels_nome[indice].text = ""
+		_viewports_3d[indice].visible = false
+	elif slot.item.modelo_3d != null:
+		_icones[indice].texture = null
+		_labels_nome[indice].text = ""
+		_mostrar_modelo_3d(indice, slot.item.modelo_3d)
 	else:
 		_icones[indice].texture = null
+		_viewports_3d[indice].visible = false
 		_labels_nome[indice].text = slot.item.nome_exibicao
 		var estilo := _paineis[indice].get_theme_stylebox("panel") as StyleBoxFlat
 		if estilo:
-			# Cor derivada do hash do id — sempre a mesma cor para o mesmo item
 			var h := float(slot.item.id.hash() & 0xFFFF) / float(0xFFFF)
 			estilo.bg_color = Color.from_hsv(h, 0.55, 0.35, 0.85)
 
@@ -184,6 +233,36 @@ func _animar_pulso(painel: Panel) -> void:
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	tween.tween_property(painel, "scale", Vector2.ONE, 0.12) \
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+
+
+# --- MODELO 3D NO SLOT ---
+
+# Instancia o modelo 3D do item dentro do SubViewport do slot
+func _mostrar_modelo_3d(indice: int, cena: PackedScene) -> void:
+	var svc := _viewports_3d[indice]
+	var sv: SubViewport = svc.get_node("SV")
+
+	# Remove modelo anterior se existir
+	var antigo := sv.get_node_or_null("ItemModelo")
+	if antigo != null:
+		antigo.queue_free()
+
+	var modelo: Node3D = cena.instantiate() as Node3D
+	if modelo == null:
+		return
+	modelo.name = "ItemModelo"
+	sv.add_child(modelo)
+	svc.visible = true
+	sv.render_target_update_mode = SubViewport.UPDATE_ONCE
+
+
+# Remove o modelo 3D do SubViewport do slot
+func _limpar_viewport_3d(indice: int) -> void:
+	var svc := _viewports_3d[indice]
+	var sv: SubViewport = svc.get_node("SV")
+	var antigo := sv.get_node_or_null("ItemModelo")
+	if antigo != null:
+		antigo.queue_free()
 
 
 # --- SINAIS ---

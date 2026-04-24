@@ -4,8 +4,6 @@
 [ext_resource type="Script" uid="uid://pqt0jpgkem4w" path="res://scripts/camera_follow.gd" id="2"]
 [ext_resource type="Script" uid="uid://c5k0o8ovpo03q" path="res://scripts/mundo.gd" id="9_world"]
 [ext_resource type="Script" uid="uid://cr2g0ou3j0b8g" path="res://scripts/path_visualizer.gd" id="10_pathviz"]
-[ext_resource type="PackedScene" uid="uid://cmf05emra420d" path="res://obj/kenney_bee/animal-bee.glb" id="12_bee"]
-[ext_resource type="Script" uid="uid://qnk88aefcj5p" path="res://scripts/bee.gd" id="13_bee"]
 
 [sub_resource type="Environment" id="2"]
 background_mode = 1
@@ -32,13 +30,13 @@ light_color = Color(0.94152987, 1, 0.7493974, 1)
 light_energy = 1.5
 shadow_enabled = true
 shadow_bias = 0.02
-directional_shadow_max_distance = 40.0
+directional_shadow_max_distance = 80.0
 
 [node name="Camera3D" type="Camera3D" parent="." unique_id=386023982]
 transform = Transform3D(0.78970814, -0.1980107, 0.58064854, 0.026417343, 0.95657706, 0.29027975, -0.6129137, -0.21389712, 0.76064765, 4.5, 5.5, 7)
 projection = 1
-size = 7.0
-far = 200.0
+size = 12.0
+far = 300.0
 script = ExtResource("2")
 
 [node name="Player" parent="." unique_id=1492870774 instance=ExtResource("1")]
@@ -49,10 +47,3 @@ script = ExtResource("10_pathviz")
 [node name="LineMesh" type="MeshInstance3D" parent="PathVisualizer" unique_id=431687943]
 
 [node name="ArrowMesh" type="MeshInstance3D" parent="PathVisualizer" unique_id=601897189]
-
-[node name="Bee" type="Node3D" parent="." unique_id=1305881234]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
-script = ExtResource("13_bee")
-
-[node name="BeeModel" parent="Bee" unique_id=304713591 instance=ExtResource("12_bee")]
-transform = Transform3D(-0.15, 0, 0, 0, 0.15, 0, 0, 0, -0.15, 0, 0, 0)

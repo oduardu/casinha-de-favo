@@ -1,17 +1,46 @@
 class_name NPC
 extends Node3D
 
+# NPC comerciante: o jogador pode vender itens em troca de moedas.
+# O valor da venda depende do valor_venda de cada Item.
+# Detecta a proximidade do jogador via Area3D e exibe dicas contextuais.
+
+
+# --- SINAIS ---
+
+## Emitido quando um CharacterBody3D entra na área de detecção do NPC
+signal jogador_entrou_npc
+
+## Emitido quando um CharacterBody3D sai da área de detecção do NPC
+signal jogador_saiu_npc
+
+
 # --- REFERÊNCIAS INTERNAS ---
 
 ## Caixa roxa que representa visualmente o corpo do NPC (placeholder)
 var _corpo: CSGBox3D = null
 
+## Area3D que detecta a proximidade do jogador
+var _area_deteccao: Area3D = null
+
+## Label3D que mostra a dica contextual ao jogador ("Vender Mel" / "Sem mel")
+var _hint_label: Label3D = null
+
+## True enquanto o jogador está dentro da área de detecção
+var _jogador_proximo: bool = false
+
+## Referência ao jogador dentro da área (para acessar inventário na venda)
+var _jogador_ref: Node = null
+
 
 # --- CICLO DE VIDA ---
 
 func _ready() -> void:
+	add_to_group("npc")
 	_criar_corpo()
 	_iniciar_animacao_respiracao()
+	_criar_area_deteccao()
+	_criar_hint_label()
 
 
 # --- CRIAÇÃO DOS ELEMENTOS ---
@@ -28,6 +57,114 @@ func _criar_corpo() -> void:
 	_corpo.material_override = mat
 
 	add_child(_corpo)
+
+
+## Cria a Area3D cilíndrica que detecta o jogador ao se aproximar do NPC
+func _criar_area_deteccao() -> void:
+	_area_deteccao = Area3D.new()
+	_area_deteccao.name = "AreaNPC"
+
+	var col := CollisionShape3D.new()
+	var forma := CylinderShape3D.new()
+	forma.radius = 2.0   # Raio de detecção ao redor do NPC
+	forma.height = 3.0
+	col.shape = forma
+	col.position.y = 1.0
+
+	_area_deteccao.add_child(col)
+	_area_deteccao.body_entered.connect(_ao_entrar_area)
+	_area_deteccao.body_exited.connect(_ao_sair_area)
+	add_child(_area_deteccao)
+
+
+## Cria o Label3D de instrução visível quando o jogador está próximo
+func _criar_hint_label() -> void:
+	_hint_label = Label3D.new()
+	_hint_label.name = "HintNPC"
+	_hint_label.font_size = 22
+	_hint_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_hint_label.position.y = 1.7
+	_hint_label.visible = false
+	add_child(_hint_label)
+
+
+# --- CALLBACKS DA ÁREA ---
+
+## Disparado quando um corpo entra na área; exibe hint contextual e emite sinal
+func _ao_entrar_area(body: Node3D) -> void:
+	if not (body is CharacterBody3D):
+		return
+	_jogador_proximo = true
+	_jogador_ref = body
+	_atualizar_hint()
+	_hint_label.visible = true
+	jogador_entrou_npc.emit()
+
+
+## Disparado quando um corpo sai da área; esconde hint e emite sinal
+func _ao_sair_area(body: Node3D) -> void:
+	if not (body is CharacterBody3D):
+		return
+	_jogador_proximo = false
+	_jogador_ref = null
+	_hint_label.visible = false
+	jogador_saiu_npc.emit()
+
+
+# --- VENDA ---
+
+## Chamada pelo Player ao pressionar E próximo ao NPC.
+## Verifica se o item na mão tem valor_venda > 0 e executa a venda.
+## Retorna true se a venda foi realizada com sucesso.
+func tentar_vender(jogador: Node) -> bool:
+	var inv: Node = jogador.get_node_or_null("Inventario")
+	if inv == null:
+		return false
+
+	# Verifica se o item na mão tem valor de venda
+	var item_mao: Item = inv.obter_item_na_mao()
+	if item_mao == null or item_mao.valor_venda <= 0:
+		_animar_recusa()
+		return false
+
+	# Guarda o valor antes de remover (o slot pode esvaziar)
+	var valor: int = item_mao.valor_venda
+
+	# Remove 1 unidade do inventário e paga o jogador
+	if not inv.remover_item_na_mao(1):
+		return false
+
+	GerenciadorMundo.adicionar_moedas(valor)
+	_animar_venda()
+	_atualizar_hint()
+	return true
+
+
+# --- VISUAL ---
+
+## Atualiza o texto do hint conforme o item na mão do jogador
+func _atualizar_hint() -> void:
+	if _hint_label == null or _jogador_ref == null:
+		return
+
+	var inv: Node = _jogador_ref.get_node_or_null("Inventario")
+	if inv == null:
+		_hint_label.text = "..."
+		return
+
+	var item_mao: Item = inv.obter_item_na_mao()
+	if item_mao != null and item_mao.valor_venda > 0:
+		_hint_label.text = "E — Vender %s (%d moeda)" % [item_mao.nome_exibicao, item_mao.valor_venda]
+		_hint_label.modulate = Color(1.0, 0.88, 0.15)  # Amarelo dourado
+	else:
+		_hint_label.text = "Compro mel!"
+		_hint_label.modulate = Color(0.75, 0.65, 0.85)  # Lilás suave
+
+
+## Atualiza o hint quando o inventário do jogador muda (item trocado, mel vendido, etc.)
+func _ao_inventario_mudou() -> void:
+	if _jogador_proximo:
+		_atualizar_hint()
 
 
 # --- ANIMAÇÃO ---
@@ -48,3 +185,21 @@ func _iniciar_animacao_respiracao() -> void:
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	tween.tween_property(_corpo, "scale:y", 1.0, 0.5) \
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+
+## Feedback visual de venda bem-sucedida: pulso no corpo
+func _animar_venda() -> void:
+	var tween := create_tween()
+	tween.tween_property(_corpo, "scale", Vector3(1.2, 1.2, 1.2), 0.12) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tween.tween_property(_corpo, "scale", Vector3.ONE, 0.2) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+
+
+## Feedback visual de recusa: balança lateralmente indicando que não aceita o item
+func _animar_recusa() -> void:
+	var tween := create_tween()
+	tween.tween_property(_corpo, "position:x", 0.08, 0.06)
+	tween.tween_property(_corpo, "position:x", -0.08, 0.06)
+	tween.tween_property(_corpo, "position:x", 0.05, 0.06)
+	tween.tween_property(_corpo, "position:x", 0.0, 0.06)

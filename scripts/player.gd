@@ -28,6 +28,10 @@ var hex_tile_compravel: Node = null  # Hex tile bloqueado adjacente que pode ser
 var colmeia_proxima: Node = null  # Colmeia dentro da área de detecção; null se nenhuma
 
 
+# --- INTERAÇÃO COM NPC ---
+var npc_proximo: Node = null  # NPC dentro da área de detecção; null se nenhum
+
+
 # --- INTERAÇÃO COM TILE ---
 var tile_atual: Node3D = null             # Tile de fazenda onde o jogador está no momento
 var esta_plantando: bool = false           # True enquanto o plantio está em andamento
@@ -76,12 +80,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			target.y = 0.0
 			_nav.target_position = target
 
-	# Tecla E (interagir): farm tile → colmeia → hex comprável (prioridade nessa ordem)
+	# Tecla E (interagir): farm tile → colmeia → NPC → hex comprável (prioridade nessa ordem)
 	if event.is_action_pressed("interagir"):
 		if tile_atual != null:
 			_tentar_interagir()
 		elif colmeia_proxima != null:
 			colmeia_proxima.tentar_coletar(self)
+		elif npc_proximo != null:
+			npc_proximo.tentar_vender(self)
 		elif hex_tile_compravel != null:
 			hex_tile_compravel.tentar_comprar(self)
 
@@ -226,6 +232,16 @@ func _ao_entrar_colmeia_area(colmeia: Node) -> void:
 # Conectado ao sinal jogador_saiu_colmeia via mundo.gd — limpa a referência
 func _ao_sair_colmeia_area() -> void:
 	colmeia_proxima = null
+
+
+# Conectado ao sinal jogador_entrou_npc via mundo.gd — armazena o NPC próximo
+func _ao_entrar_npc_area(npc: Node) -> void:
+	npc_proximo = npc
+
+
+# Conectado ao sinal jogador_saiu_npc via mundo.gd — limpa a referência
+func _ao_sair_npc_area() -> void:
+	npc_proximo = null
 
 
 # --- INVENTÁRIO ---

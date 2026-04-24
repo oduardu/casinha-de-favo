@@ -3,6 +3,7 @@ extends Node3D
 
 # Controla o ciclo de vida de uma abelha ligada a uma colmeia:
 # orbita por fora, entra, produz mel, sai — em loop infinito.
+# Usa o modelo 3D da abelha (animal-bee.glb) com animação "dance".
 
 
 # --- SINAIS ---
@@ -36,6 +37,9 @@ enum EstadoAbelha {
 ## Duração em segundos de uma volta completa ao redor da colmeia
 @export var velocidade_orbita: float = 3.0
 
+## Escala aplicada ao modelo da abelha (o modelo original é grande)
+@export var escala_modelo: float = 0.15
+
 
 # --- ESTADO INTERNO ---
 
@@ -51,8 +55,11 @@ var _angulo_orbita: float = 0.0
 
 # --- NÓS FILHOS ---
 
-## CSGSphere3D que representa visualmente o corpo da abelha
-var _corpo: CSGSphere3D = null
+## Node3D instanciado do modelo 3D da abelha (animal-bee.glb)
+var _modelo: Node3D = null
+
+## AnimationPlayer encontrado na hierarquia do modelo; toca "dance" em loop
+var _anim: AnimationPlayer = null
 
 ## Tween ativo durante as transições ENTRANDO e SAINDO
 var _tween: Tween = null
@@ -61,22 +68,50 @@ var _tween: Tween = null
 # --- CICLO DE VIDA ---
 
 func _ready() -> void:
-	_criar_corpo()
+	_criar_modelo()
 	# Começa já na borda da órbita
 	position = Vector3(raio_orbita, 0.9, 0.0)
 
 
 # --- CRIAÇÃO VISUAL ---
 
-## Cria a esfera amarela de ~0.15 unidades de diâmetro que representa a abelha
-func _criar_corpo() -> void:
-	_corpo = CSGSphere3D.new()
-	_corpo.name = "CorpoAbelha"
-	_corpo.radius = 0.075  # Diâmetro ≈ 0.15 unidades
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.96, 0.78, 0.26)  # Amarelo mel
-	_corpo.material_override = mat
-	add_child(_corpo)
+## Instancia o modelo da abelha (animal-bee.glb), aplica escala e inicia a animação "dance"
+func _criar_modelo() -> void:
+	var cena_abelha: PackedScene = load("res://obj/kenney_bee/animal-bee.glb")
+	if cena_abelha == null:
+		push_warning("abelha.gd: modelo animal-bee.glb não encontrado.")
+		return
+
+	_modelo = cena_abelha.instantiate() as Node3D
+	_modelo.name = "ModeloAbelha"
+	# Escala uniforme negativa no Z para orientar a abelha corretamente na órbita
+	_modelo.scale = Vector3(escala_modelo, escala_modelo, escala_modelo)
+	add_child(_modelo)
+
+	# Busca o AnimationPlayer e inicia a animação "dance" em loop
+	call_deferred("_iniciar_animacao")
+
+
+## Busca o AnimationPlayer na hierarquia e inicia "dance" em loop contínuo
+func _iniciar_animacao() -> void:
+	_anim = _encontrar_anim_player(self)
+	if _anim == null:
+		return
+	var anim := _anim.get_animation("dance")
+	if anim:
+		anim.loop_mode = Animation.LOOP_LINEAR  # Força loop contínuo da animação
+	_anim.play("dance")
+
+
+## Busca recursivamente um AnimationPlayer em qualquer nível da hierarquia
+func _encontrar_anim_player(node: Node) -> AnimationPlayer:
+	if node is AnimationPlayer:
+		return node
+	for child in node.get_children():
+		var resultado := _encontrar_anim_player(child)
+		if resultado:
+			return resultado
+	return null
 
 
 # --- PROCESSAMENTO ---
@@ -95,6 +130,7 @@ func _process(delta: float) -> void:
 
 ## Move a abelha na órbita circular com leve oscilação vertical.
 ## TAU / velocidade_orbita = radianos por segundo para 1 volta completa.
+## Orienta o modelo na direção do movimento.
 func _atualizar_voando(delta: float) -> void:
 	_angulo_orbita += (TAU / velocidade_orbita) * delta
 	if _angulo_orbita > TAU:
@@ -104,6 +140,16 @@ func _atualizar_voando(delta: float) -> void:
 	position.x = cos(_angulo_orbita) * raio_orbita
 	position.z = sin(_angulo_orbita) * raio_orbita
 	position.y = 0.9 + sin(_angulo_orbita * 2.5) * 0.12
+
+	# Orienta a abelha na direção tangente da órbita
+	var tangente := Vector3(
+		-sin(_angulo_orbita) * raio_orbita,
+		0.0,
+		cos(_angulo_orbita) * raio_orbita
+	)
+	if tangente.length_squared() > 0.001:
+		var alvo := global_position + tangente.normalized()
+		look_at(alvo, Vector3.UP)
 
 	_tempo_acumulado += delta
 	if _tempo_acumulado >= tempo_voando:

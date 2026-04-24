@@ -17,3 +17,6 @@ extends Resource
 @export var tipo_interacao: String = ""          # Tag que determina o que esse item pode fazer
                                                   # Ex: "plantar", "regar", "coletar"
                                                   # Objetos do mundo verificam essa tag antes de aceitar a interação
+
+# --- ECONOMIA ---
+@export var valor_venda: int = 0                 # Moedas recebidas ao vender este item para o NPC

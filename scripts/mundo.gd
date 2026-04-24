@@ -14,8 +14,8 @@ extends Node3D
 
 # --- CONSTANTES ---
 
-## Escala de renderização dos tiles (3× o tamanho original do modelo)
-const TILE_SCALE := 3.0
+## Escala de renderização dos tiles (tamanho visual dos hexágonos)
+const TILE_SCALE := 5.0
 
 ## Limite mínimo de q na grade inicial 4×4
 const Q_MIN := -1
@@ -29,14 +29,14 @@ const R_MIN := -1
 ## Limite máximo de r na grade inicial 4×4
 const R_MAX := 2
 
+## Raio do hexágono em unidades de mundo (metade da distância entre centros opostos)
+const HEX_RAIO := TILE_SCALE * 0.58
+
 
 # --- ESTADO ---
 
 ## PackedScene do HexTile carregada em _ready (res://scenes/hex_tile.tscn)
 var _hex_tile_cena: PackedScene = null
-
-## PackedScene do FarmTile carregada em _ready (res://scenes/farm_tile.tscn)
-var _farm_tile_cena: PackedScene = null
 
 ## Script da Colmeia carregado em _ready para ser aplicado em Node3D instanciados
 var _colmeia_cena_script: Script = null
@@ -50,14 +50,11 @@ var _tiles_por_coord: Dictionary = {}
 ## Deslocamento em unidades de mundo para centralizar a grade no ponto de origem
 var _deslocamento_centro: Vector3 = Vector3.ZERO
 
-## Extremidade mínima (x, z) da grade navegável, usada para construir a NavigationMesh
-var _navmesh_min: Vector2 = Vector2.ZERO
-
-## Extremidade máxima (x, z) da grade navegável, usada para construir a NavigationMesh
-var _navmesh_max: Vector2 = Vector2.ZERO
-
 ## StaticBody3D plano que serve de chão sob a área jogável; recriado ao comprar tiles
 var _piso_corpo: StaticBody3D = null
+
+## Menu de pausa criado em runtime (CanvasLayer com botões)
+var _menu_pausa: CanvasLayer = null
 
 
 # --- CICLO DE VIDA ---
@@ -69,6 +66,8 @@ func _notification(what: int) -> void:
 
 
 func _ready() -> void:
+	# Permite que este nó processe input mesmo durante pausa (para ESC fechar o menu)
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	_carregar_recursos()
 	GerenciadorMundo.carregar()
 	# Garante que o jogador começa com pelo menos moedas_debug moedas
@@ -81,14 +80,22 @@ func _ready() -> void:
 	_reconstruir_navmesh()
 	_criar_piso()
 	_colocar_edificios()
-	_colocar_farm_tiles()
 	_setup_hotbar()
-	_dar_itens_iniciais()
+	_criar_menu_pausa()
 
 	# Conecta o PathVisualizer ao NavigationAgent3D do jogador
 	var agente = $Player.get_node("NavigationAgent3D")
 	if agente != null and $PathVisualizer != null:
 		$PathVisualizer.setup(agente)
+
+
+# --- INPUT ---
+
+## Tecla ESC abre/fecha o menu de pausa
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		_alternar_menu_pausa()
+		get_viewport().set_input_as_handled()
 
 
 # --- CONFIGURAÇÃO ---
@@ -99,11 +106,6 @@ func _carregar_recursos() -> void:
 		_hex_tile_cena = load("res://scenes/hex_tile.tscn")
 	else:
 		push_error("mundo.gd: cena hex_tile.tscn não encontrada em res://scenes/")
-
-	if ResourceLoader.exists("res://scenes/farm_tile.tscn"):
-		_farm_tile_cena = load("res://scenes/farm_tile.tscn")
-	else:
-		push_warning("mundo.gd: cena farm_tile.tscn não encontrada — farm tiles não serão criados.")
 
 	if ResourceLoader.exists("res://scripts/colmeia.gd"):
 		_colmeia_cena_script = load("res://scripts/colmeia.gd")
@@ -145,6 +147,18 @@ func obter_tile(coord: Vector2i) -> HexTile:
 	return _tiles_por_coord.get(coord, null)
 
 
+## Retorna os 6 vértices de um hexágono pointy-top centrado em 'centro' com raio 'raio'
+func _hex_vertices(centro: Vector2, raio: float) -> PackedVector2Array:
+	var verts := PackedVector2Array()
+	for i in 6:
+		var angulo := deg_to_rad(30.0 + i * 60.0)
+		verts.append(Vector2(
+			centro.x + raio * cos(angulo),
+			centro.y + raio * sin(angulo)
+		))
+	return verts
+
+
 # --- GERAÇÃO DO MUNDO ---
 
 ## Calcula _deslocamento_centro como a média das posições brutas de todos os tiles iniciais,
@@ -162,19 +176,10 @@ func _calcular_deslocamento() -> void:
 
 
 ## Gera os 16 tiles jogáveis da grade inicial (grass, desbloqueados)
-## e atualiza os limites da navmesh
 func _gerar_grade_inicial() -> void:
-	_navmesh_min = Vector2(INF, INF)
-	_navmesh_max = Vector2(-INF, -INF)
-
 	for q in range(Q_MIN, Q_MAX + 1):
 		for r in range(R_MIN, R_MAX + 1):
 			_criar_tile(Vector2i(q, r), "grass", true, 0)
-			var pos := _axial_para_mundo(q, r)
-			_navmesh_min.x = minf(_navmesh_min.x, pos.x)
-			_navmesh_min.y = minf(_navmesh_min.y, pos.z)
-			_navmesh_max.x = maxf(_navmesh_max.x, pos.x)
-			_navmesh_max.y = maxf(_navmesh_max.y, pos.z)
 
 
 ## Gera os tiles externos bloqueados (grass) ao redor da grade inicial,
@@ -209,7 +214,6 @@ func _criar_tile(coord: Vector2i, tipo: String, eh_desbloqueado: bool, custo: in
 	tile.desbloqueado = eh_desbloqueado
 	tile.preco = custo
 	tile.position = _axial_para_mundo(coord.x, coord.y)
-	# A posição y do modelo é tratada internamente pelo HexTile (_ready aplica -0.2*TILE_SCALE)
 
 	add_child(tile)
 	_tiles_por_coord[coord] = tile
@@ -252,33 +256,51 @@ func _aplicar_estado_salvo() -> void:
 				tile._label_erro.visible = false
 
 
-# --- GRADE INICIAL ---
-
-## (Veja _gerar_grade_inicial acima — seção separada para clareza)
-
-
-# --- TILES EXTERNOS ---
-
-## (Veja _gerar_tiles_externos acima — seção separada para clareza)
-
-
 # --- COLISÃO E NAVEGAÇÃO ---
 
-## Cria o chão plano sob a grade jogável: colisão (StaticBody3D) + malha visual verde
-## que cobre quaisquer brechas entre os hexágonos
+## Coleta as posições de todos os tiles desbloqueados como Vector2 (x, z)
+func _coletar_centros_desbloqueados() -> Array[Vector2]:
+	var centros: Array[Vector2] = []
+	for coord in _tiles_por_coord:
+		var tile := _tiles_por_coord[coord] as HexTile
+		if tile.desbloqueado:
+			var pos := tile.global_position
+			centros.append(Vector2(pos.x, pos.z))
+	return centros
+
+
+## Cria o chão plano sob a área jogável, dimensionado a partir
+## do bounding box dos hexágonos desbloqueados
 func _criar_piso() -> void:
-	# Remove chão anterior se existir (ex.: após compra de tile)
 	if is_instance_valid(_piso_corpo):
 		_piso_corpo.queue_free()
 		_piso_corpo = null
 
+	var centros := _coletar_centros_desbloqueados()
+	if centros.is_empty():
+		return
+
+	# Calcula bounding box dos centros dos hexágonos desbloqueados
+	var bb_min := centros[0]
+	var bb_max := centros[0]
+	for c in centros:
+		bb_min.x = minf(bb_min.x, c.x)
+		bb_min.y = minf(bb_min.y, c.y)
+		bb_max.x = maxf(bb_max.x, c.x)
+		bb_max.y = maxf(bb_max.y, c.y)
+
+	# Margem de um hex inteiro ao redor do bounding box
+	var margem := HEX_RAIO * 2.0
+	bb_min -= Vector2(margem, margem)
+	bb_max += Vector2(margem, margem)
+
+	var cx := (bb_min.x + bb_max.x) * 0.5
+	var cz := (bb_min.y + bb_max.y) * 0.5
+	var largura := bb_max.x - bb_min.x
+	var profund := bb_max.y - bb_min.y
+
 	_piso_corpo = StaticBody3D.new()
 	_piso_corpo.name = "PisoJogavel"
-
-	var cx: float = (_navmesh_min.x + _navmesh_max.x) * 0.5
-	var cz: float = (_navmesh_min.y + _navmesh_max.y) * 0.5
-	var largura: float = (_navmesh_max.x - _navmesh_min.x) + TILE_SCALE * 2.0
-	var profund: float = (_navmesh_max.y - _navmesh_min.y) + TILE_SCALE * 2.0
 
 	# Colisão: fino BoxShape3D logo abaixo de y=0
 	var forma := BoxShape3D.new()
@@ -288,15 +310,14 @@ func _criar_piso() -> void:
 	colisao.position = Vector3(cx, -0.05, cz)
 	_piso_corpo.add_child(colisao)
 
-	# Visual: PlaneMesh verde-grama cobrindo toda a área + margem extra
-	# Fica em y=-0.30 para aparecer nas brechas entre tiles sem cobri-los
+	# Visual: PlaneMesh verde-grama cobrindo toda a área
 	var mesh_piso := MeshInstance3D.new()
 	mesh_piso.name = "MeshPisoVisual"
 	var plano := PlaneMesh.new()
-	plano.size = Vector2(largura * 1.6, profund * 1.6)
+	plano.size = Vector2(largura * 1.4, profund * 1.4)
 	mesh_piso.mesh = plano
 	var mat_piso := StandardMaterial3D.new()
-	mat_piso.albedo_color = Color(0.22, 0.52, 0.18)  # Verde grama
+	mat_piso.albedo_color = Color(0.22, 0.52, 0.18)
 	mesh_piso.material_override = mat_piso
 	mesh_piso.position = Vector3(cx, -0.30, cz)
 	_piso_corpo.add_child(mesh_piso)
@@ -304,34 +325,44 @@ func _criar_piso() -> void:
 	add_child(_piso_corpo)
 
 
-## Reconstrói a NavigationMesh retangular que cobre a área jogável atual,
-## adicionando uma margem de TILE_SCALE * 0.6 para o agente não ficar preso nas bordas
+## Reconstrói a NavigationMesh como um polígono que une os hexágonos desbloqueados.
+## Usa o convex hull de todos os vértices dos hexágonos para criar a área navegável.
 func _reconstruir_navmesh() -> void:
 	var nav_region := get_node_or_null("NavigationRegion3D") as NavigationRegion3D
 	if nav_region == null:
 		push_warning("mundo.gd: NavigationRegion3D não encontrado.")
 		return
 
-	var margem := TILE_SCALE * 0.6
-	var x_min := _navmesh_min.x - margem
-	var x_max := _navmesh_max.x + margem
-	var z_min := _navmesh_min.y - margem
-	var z_max := _navmesh_max.y + margem
+	var centros := _coletar_centros_desbloqueados()
+	if centros.is_empty():
+		return
 
-	# Constrói a NavigationMesh com um polígono retangular simples
+	# Coleta todos os vértices de todos os hexágonos desbloqueados
+	var pontos_2d: PackedVector2Array = PackedVector2Array()
+	for c in centros:
+		var hex_verts := _hex_vertices(c, HEX_RAIO)
+		for v in hex_verts:
+			pontos_2d.append(v)
+
+	# Calcula o convex hull dos pontos 2D
+	var hull := Geometry2D.convex_hull(pontos_2d)
+	if hull.size() < 3:
+		return
+
+	# Converte o hull 2D para vértices 3D no plano XZ
+	var verts_3d := PackedVector3Array()
+	for p in hull:
+		verts_3d.append(Vector3(p.x, 0.0, p.y))
+
 	var navmesh := NavigationMesh.new()
 	navmesh.cell_height = 0.1
+	navmesh.vertices = verts_3d
 
-	# Os vértices definem o retângulo no plano XZ
-	navmesh.vertices = PackedVector3Array([
-		Vector3(x_min, 0.0, z_min),
-		Vector3(x_max, 0.0, z_min),
-		Vector3(x_max, 0.0, z_max),
-		Vector3(x_min, 0.0, z_max),
-	])
-
-	# Um único polígono (quad) usando os 4 vértices
-	navmesh.add_polygon(PackedInt32Array([0, 1, 2, 3]))
+	# Cria um polígono com todos os índices do hull
+	var indices := PackedInt32Array()
+	for i in verts_3d.size():
+		indices.append(i)
+	navmesh.add_polygon(indices)
 
 	nav_region.navigation_mesh = navmesh
 
@@ -345,75 +376,42 @@ func _colocar_edificios() -> void:
 	_criar_npc()
 
 
-## Constrói a casa com CSGBox3D (corpo + telhado + porta + chaminé) e colisão precisa.
-## Ocupa visualmente os tiles (2,2) e (2,1) — base 2.8×2.8, telhado em duas águas.
+## Instancia o modelo building-house.glb no tile (Q_MIN, R_MIN).
+## Usa a mesma escala dos tiles hexagonais (TILE_SCALE) para encaixar no grid.
+## Adiciona colisão física e rotaciona para que a frente fique visível na câmera isométrica.
 func _criar_casa() -> void:
-	var pos_casa := _axial_para_mundo(Q_MAX, R_MAX)  # Tile (2, 2)
+	var pos_casa := _axial_para_mundo(Q_MIN, R_MIN)
 
-	# Raiz visual da casa; todos os elementos são filhos deste nó
-	var casa := Node3D.new()
-	casa.name = "Casa"
-	casa.position = pos_casa
-	add_child(casa)
+	var cena_casa: PackedScene = load("res://obj/kenney_hexagonal/building-house.glb")
+	if cena_casa == null:
+		push_warning("mundo.gd: building-house.glb não encontrado.")
+		return
 
-	# --- Paredes ---
-	var corpo := CSGBox3D.new()
-	corpo.size = Vector3(2.8, 2.5, 2.8)
-	corpo.position.y = 1.25  # Base apoiada em y=0
-	var mat_parede := StandardMaterial3D.new()
-	mat_parede.albedo_color = Color(0.95, 0.90, 0.80)  # Creme
-	corpo.material_override = mat_parede
-	casa.add_child(corpo)
+	# Nó raiz para agrupar modelo + colisão
+	var casa_raiz := Node3D.new()
+	casa_raiz.name = "Casa"
+	casa_raiz.position = Vector3(pos_casa.x, 0.0, pos_casa.z)
+	add_child(casa_raiz)
 
-	# Material compartilhado do telhado (terracota)
-	var mat_teto := StandardMaterial3D.new()
-	mat_teto.albedo_color = Color(0.65, 0.25, 0.15)
+	# Modelo visual — mesma escala e offset Y dos tiles hex
+	var modelo: Node3D = cena_casa.instantiate() as Node3D
+	modelo.name = "ModeloCasa"
+	modelo.position.y = -0.2 * TILE_SCALE
+	modelo.scale = Vector3.ONE * TILE_SCALE
+	modelo.rotation_degrees.y = 180.0
+	casa_raiz.add_child(modelo)
 
-	# --- Telhado esquerdo (inclinação ≈ 46°) ---
-	# Dois painéis formam o telhado em duas águas; ângulo calculado para ridge em y≈4.0
-	var teto_esq := CSGBox3D.new()
-	teto_esq.size = Vector3(2.15, 0.18, 3.2)
-	teto_esq.rotation_degrees.z = 46.0
-	teto_esq.position = Vector3(-0.7, 3.25, 0.0)
-	teto_esq.material_override = mat_teto
-	casa.add_child(teto_esq)
-
-	# --- Telhado direito ---
-	var teto_dir := CSGBox3D.new()
-	teto_dir.size = Vector3(2.15, 0.18, 3.2)
-	teto_dir.rotation_degrees.z = -46.0
-	teto_dir.position = Vector3(0.7, 3.25, 0.0)
-	teto_dir.material_override = mat_teto
-	casa.add_child(teto_dir)
-
-	# --- Porta (face frontal z negativo) ---
-	var porta := CSGBox3D.new()
-	porta.size = Vector3(0.75, 1.5, 0.25)
-	porta.position = Vector3(0.0, 0.75, -1.53)
-	var mat_porta := StandardMaterial3D.new()
-	mat_porta.albedo_color = Color(0.42, 0.26, 0.10)  # Madeira escura
-	porta.material_override = mat_porta
-	casa.add_child(porta)
-
-	# --- Chaminé ---
-	var chamine := CSGBox3D.new()
-	chamine.size = Vector3(0.38, 1.1, 0.38)
-	chamine.position = Vector3(0.85, 3.65, 0.65)
-	var mat_chamine := StandardMaterial3D.new()
-	mat_chamine.albedo_color = Color(0.48, 0.33, 0.23)  # Tijolo
-	chamine.material_override = mat_chamine
-	casa.add_child(chamine)
-
-	# --- Colisão física (separada do visual, tamanho do corpo principal) ---
+	# Colisão física — cilindro que impede o jogador de atravessar a casa
 	var fis := StaticBody3D.new()
 	fis.name = "CasaColisao"
-	var forma := BoxShape3D.new()
-	forma.size = Vector3(2.8, 4.2, 2.8)
+	var forma := CylinderShape3D.new()
+	forma.radius = TILE_SCALE * 0.4
+	forma.height = TILE_SCALE * 1.0
 	var col := CollisionShape3D.new()
 	col.shape = forma
-	col.position.y = 2.1
+	col.position.y = forma.height * 0.5
 	fis.add_child(col)
-	casa.add_child(fis)
+	casa_raiz.add_child(fis)
 
 
 ## Instancia a Colmeia no tile (0, 0) e conecta seus sinais de proximidade ao Player
@@ -429,7 +427,6 @@ func _criar_colmeia() -> void:
 	colmeia.position.y = 0.0
 	add_child(colmeia)
 
-	# Conecta os sinais de proximidade da colmeia ao Player
 	var jogador := get_node_or_null("Player")
 	if jogador != null:
 		if colmeia.has_signal("jogador_entrou_colmeia") and jogador.has_method("_ao_entrar_colmeia_area"):
@@ -440,7 +437,8 @@ func _criar_colmeia() -> void:
 			colmeia.jogador_saiu_colmeia.connect(jogador._ao_sair_colmeia_area)
 
 
-## Instancia um Node3D com o script NPC e o posiciona no tile (2, 1)
+## Instancia um Node3D com o script NPC na frente da casa (tile 0, -1).
+## Conecta os sinais de proximidade ao Player para permitir venda de mel.
 func _criar_npc() -> void:
 	if _npc_script == null:
 		push_warning("mundo.gd: script npc.gd não carregado — NPC não será criado.")
@@ -449,60 +447,33 @@ func _criar_npc() -> void:
 	var npc := Node3D.new()
 	npc.name = "NPC"
 	npc.set_script(_npc_script)
-	npc.position = _axial_para_mundo(Q_MAX, R_MAX - 1)  # (2, 1)
+	npc.position = _axial_para_mundo(Q_MIN + 1, R_MIN)  # (0, -1) — na frente da casa
 	npc.position.y = 0.0
 	add_child(npc)
 
-
-# --- FARM TILES ---
-
-## Instancia o FarmTile em (1, -1) e conecta seus sinais ao Player
-func _colocar_farm_tiles() -> void:
-	if _farm_tile_cena == null:
-		push_warning("mundo.gd: farm_tile.tscn não carregado — farm tiles não serão criados.")
-		return
-
 	var jogador := get_node_or_null("Player")
-
-	var farm_tile = _farm_tile_cena.instantiate()
-	farm_tile.name = "FarmTile_1_neg1"
-	farm_tile.position = _axial_para_mundo(1, -1)
-	farm_tile.position.y = 0.0
-	add_child(farm_tile)
-
-	# Conecta os sinais de entrada/saída do farm tile ao Player
-	# jogador_entrou não passa o tile como argumento — passamos farm_tile via closure
 	if jogador != null:
-		if farm_tile.has_signal("jogador_entrou") and jogador.has_method("_ao_entrar_tile"):
-			farm_tile.jogador_entrou.connect(
-				func() -> void: jogador._ao_entrar_tile(farm_tile)
+		if npc.has_signal("jogador_entrou_npc") and jogador.has_method("_ao_entrar_npc_area"):
+			npc.jogador_entrou_npc.connect(
+				func() -> void: jogador._ao_entrar_npc_area(npc)
 			)
-		if farm_tile.has_signal("jogador_saiu") and jogador.has_method("_ao_sair_tile"):
-			farm_tile.jogador_saiu.connect(jogador._ao_sair_tile)
+		if npc.has_signal("jogador_saiu_npc") and jogador.has_method("_ao_sair_npc_area"):
+			npc.jogador_saiu_npc.connect(jogador._ao_sair_npc_area)
 
-
-# --- SAVE/LOAD ---
-
-## (Save/Load é delegado ao autoload GerenciadorMundo — veja gerenciador_mundo.gd)
+		var inv: Node = jogador.get_node_or_null("Inventario")
+		if inv != null and inv.has_signal("inventario_mudou") and npc.has_method("_ao_inventario_mudou"):
+			inv.inventario_mudou.connect(npc._ao_inventario_mudou)
+		if inv != null and inv.has_signal("item_na_mao_mudou") and npc.has_method("_ao_inventario_mudou"):
+			inv.item_na_mao_mudou.connect(func(_item: Item) -> void: npc._ao_inventario_mudou())
 
 
 # --- COMPRA DE HEX ---
 
 ## Chamado quando um tile externo é comprado com sucesso.
-## Expande os limites da navmesh e reconstrói o chão e a navegação.
+## Reconstrói a navmesh e o piso baseado nos novos hexágonos desbloqueados.
 func _ao_tile_comprado(_custo: int) -> void:
-	# Recalcula os limites incluindo todos os tiles desbloqueados
-	for coord in _tiles_por_coord:
-		var tile := _tiles_por_coord[coord] as HexTile
-		if tile.desbloqueado:
-			var pos := tile.global_position
-			_navmesh_min.x = minf(_navmesh_min.x, pos.x)
-			_navmesh_min.y = minf(_navmesh_min.y, pos.z)
-			_navmesh_max.x = maxf(_navmesh_max.x, pos.x)
-			_navmesh_max.y = maxf(_navmesh_max.y, pos.z)
-
 	_reconstruir_navmesh()
-	_criar_piso()  # _criar_piso já libera e recria o chão
+	_criar_piso()
 
 
 # --- HOTBAR E INVENTÁRIO ---
@@ -512,7 +483,6 @@ func _setup_hotbar() -> void:
 	var canvas := CanvasLayer.new()
 	canvas.name = "UILayer"
 
-	# Hotbar de inventário
 	if ResourceLoader.exists("res://scenes/hotbar.tscn"):
 		var hotbar_cena: PackedScene = load("res://scenes/hotbar.tscn")
 		if hotbar_cena != null:
@@ -520,29 +490,99 @@ func _setup_hotbar() -> void:
 	else:
 		push_warning("mundo.gd: hotbar.tscn não encontrada.")
 
-	# Contador de mel (canto superior direito)
 	if ResourceLoader.exists("res://scenes/ui_mel.tscn"):
 		var ui_mel_cena: PackedScene = load("res://scenes/ui_mel.tscn")
 		if ui_mel_cena != null:
 			canvas.add_child(ui_mel_cena.instantiate())
 	else:
-		push_warning("mundo.gd: ui_mel.tscn não encontrada — contador de mel não será exibido.")
+		push_warning("mundo.gd: ui_mel.tscn não encontrada.")
 
 	add_child(canvas)
 
 
-## Dá ao jogador 5 itens do tipo Flor como ponto de partida
-func _dar_itens_iniciais() -> void:
-	if not ResourceLoader.exists("res://resources/flor.tres"):
-		push_warning("mundo.gd: flor.tres não encontrado — itens iniciais não serão dados.")
-		return
+# --- MENU DE PAUSA ---
 
-	var jogador := get_node_or_null("Player")
-	if jogador == null:
-		return
-	if not jogador.has_method("get") or jogador.get("inventario") == null:
-		return
+## Cria o menu de pausa (oculto por padrão) com botões Continuar e Reiniciar
+func _criar_menu_pausa() -> void:
+	_menu_pausa = CanvasLayer.new()
+	_menu_pausa.name = "MenuPausa"
+	_menu_pausa.layer = 10  # Acima de tudo
+	_menu_pausa.visible = false
+	add_child(_menu_pausa)
 
-	var flor = load("res://resources/flor.tres")
-	if flor != null:
-		jogador.inventario.adicionar_item(flor, 5)
+	# Fundo semitransparente que escurece o jogo
+	var fundo := ColorRect.new()
+	fundo.name = "Fundo"
+	fundo.color = Color(0.0, 0.0, 0.0, 0.6)
+	fundo.anchors_preset = Control.PRESET_FULL_RECT
+	fundo.mouse_filter = Control.MOUSE_FILTER_STOP  # Bloqueia cliques no jogo
+	_menu_pausa.add_child(fundo)
+
+	# Container central para os botões
+	var container := VBoxContainer.new()
+	container.name = "ContainerMenu"
+	container.alignment = BoxContainer.ALIGNMENT_CENTER
+	container.anchors_preset = Control.PRESET_CENTER
+	container.offset_left = -120.0
+	container.offset_right = 120.0
+	container.offset_top = -80.0
+	container.offset_bottom = 80.0
+	container.add_theme_constant_override("separation", 16)
+	_menu_pausa.add_child(container)
+
+	# Título
+	var titulo := Label.new()
+	titulo.text = "PAUSA"
+	titulo.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	titulo.add_theme_font_size_override("font_size", 32)
+	titulo.add_theme_color_override("font_color", Color(1.0, 0.92, 0.5))
+	container.add_child(titulo)
+
+	# Botão Continuar
+	var btn_continuar := Button.new()
+	btn_continuar.name = "BtnContinuar"
+	btn_continuar.text = "Continuar"
+	btn_continuar.custom_minimum_size = Vector2(240, 48)
+	btn_continuar.pressed.connect(_fechar_menu_pausa)
+	container.add_child(btn_continuar)
+
+	# Botão Reiniciar
+	var btn_reiniciar := Button.new()
+	btn_reiniciar.name = "BtnReiniciar"
+	btn_reiniciar.text = "Reiniciar Jogo"
+	btn_reiniciar.custom_minimum_size = Vector2(240, 48)
+	btn_reiniciar.pressed.connect(_reiniciar_jogo)
+	container.add_child(btn_reiniciar)
+
+
+## Alterna a visibilidade do menu de pausa e pausa/despausa o jogo
+func _alternar_menu_pausa() -> void:
+	if _menu_pausa == null:
+		return
+	var abrindo := not _menu_pausa.visible
+	_menu_pausa.visible = abrindo
+	get_tree().paused = abrindo
+
+
+## Fecha o menu de pausa e retoma o jogo
+func _fechar_menu_pausa() -> void:
+	if _menu_pausa != null:
+		_menu_pausa.visible = false
+	get_tree().paused = false
+
+
+## Reseta todo o save e recarrega a cena do zero
+func _reiniciar_jogo() -> void:
+	# Reseta os dados globais
+	GerenciadorMundo.moedas = moedas_debug
+	GerenciadorMundo.total_mel_coletado = 0
+	GerenciadorMundo.hexagonos_desbloqueados = []
+	GerenciadorMundo.estado_colmeias = {}
+
+	# Apaga o save do disco
+	if FileAccess.file_exists(GerenciadorMundo.CAMINHO_SAVE):
+		DirAccess.remove_absolute(GerenciadorMundo.CAMINHO_SAVE)
+
+	# Despausa antes de recarregar
+	get_tree().paused = false
+	get_tree().reload_current_scene()

@@ -1,14 +1,14 @@
 extends Camera3D
 
 @export var smoothing: float = 8.0
-@export var zoom_min: float = 5.0
-@export var zoom_max: float = 14.0
-@export var zoom_speed: float = 1.2
+@export var zoom_min: float = 8.0
+@export var zoom_max: float = 24.0
+@export var zoom_speed: float = 1.5
 
 const AZIMUTH_DEG := 45.0
 const ELEV_CLOSE_DEG := 35.0
 const ELEV_FAR_DEG := 65.0
-const DISTANCE := 14.0
+const DISTANCE := 22.0
 
 var _target: Node3D
 var _target_size: float

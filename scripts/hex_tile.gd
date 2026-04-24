@@ -15,8 +15,8 @@ signal comprado(custo: int)
 
 # --- CONSTANTES ---
 
-## Escala de renderização dos tiles (tiles exibidos 3× o tamanho original)
-const TILE_SCALE := 3.0
+## Escala de renderização dos tiles (deve coincidir com mundo.gd)
+const TILE_SCALE := 5.0
 
 ## Caminho do modelo GLB do tile de terra (jogável)
 const CAMINHO_DIRT := "res://obj/kenney_hexagonal/dirt.glb"
