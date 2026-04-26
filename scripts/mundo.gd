@@ -69,6 +69,9 @@ const DISTRIBUICAO_RARIDADE_BORDA: Array[float] = [35.0, 30.0, 18.0, 11.0, 6.0]
 ## Tipo visual de hexágono usado nos tiles que possuem colmeia
 const TIPO_TILE_COLMEIA_NORMAL: String = "colmeia-normal"
 
+## Tipo visual de hexágono usado nos tiles de colmeia rara
+const TIPO_TILE_COLMEIA_RARA: String = "colmeia-rara"
+
 
 # --- ESTADO ---
 
@@ -229,6 +232,8 @@ func _gerar_grade_inicial() -> void:
 func _escolher_tipo_visual_inicial(coord: Vector2i) -> String:
 	if coord == Vector2i(0, 0):
 		return TIPO_TILE_COLMEIA_NORMAL
+	if coord == Vector2i(Q_MIN, R_MIN):
+		return "path-casa"
 	if COORDS_CAMINHO_LIVRE.has(coord):
 		return _escolher_tipo_caminho(coord)
 
@@ -486,7 +491,7 @@ func _criar_colmeia_em_coord(coord: Vector2i, id_colmeia: String, raridade: Stri
 		return null
 	var tile: HexTile = obter_tile(coord)
 	if tile != null and tile.has_method("definir_tipo_visual"):
-		tile.definir_tipo_visual(TIPO_TILE_COLMEIA_NORMAL)
+		tile.definir_tipo_visual(_obter_tipo_tile_colmeia_por_raridade(raridade))
 
 	var colmeia := Node3D.new()
 	colmeia.name = "Colmeia_%s" % id_colmeia
@@ -625,6 +630,14 @@ func _obter_fator_distancia_spawn(coord: Vector2i) -> float:
 ## Retorna o ID canônico da colmeia para uma coordenada axial.
 func _obter_id_colmeia_para_coord(coord: Vector2i) -> String:
 	return "colmeia_%d_%d" % [coord.x, coord.y]
+
+
+## Retorna o tipo visual de tile da colmeia com base na raridade.
+func _obter_tipo_tile_colmeia_por_raridade(raridade: String) -> String:
+	var raridade_normalizada: String = raridade.strip_edges().to_lower()
+	if raridade_normalizada == "rara":
+		return TIPO_TILE_COLMEIA_RARA
+	return TIPO_TILE_COLMEIA_NORMAL
 
 
 ## Extrai coordenada axial de um id no formato colmeia_q_r.

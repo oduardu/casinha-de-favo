@@ -48,6 +48,12 @@ const CAMINHO_PATH_CROSSING := "res://obj/kenney_hexagonal/path-crossing.glb"
 ## Caminho do modelo GLB do hexágono de colmeia normal
 const CAMINHO_COLMEIA_HEX_NORMAL := "res://obj/colmeias/hexagonal_colmeia_normal.glb"
 
+## Caminho do modelo GLB do hexágono de colmeia rara
+const CAMINHO_COLMEIA_HEX_RARA := "res://obj/colmeias/hexagonal_colmeia_rara.glb"
+
+## Caminho do modelo GLB padrão de chão (tema chaos)
+const CAMINHO_CHAO_CHAOS := "res://obj/chaos/hexagono_chao.glb"
+
 
 # --- VARIÁVEIS DE ESTADO ---
 
@@ -106,7 +112,7 @@ func _ready() -> void:
 ## Carrega o GLB correspondente ao tipo do tile, aplica escala e posicionamento vertical
 func _carregar_modelo() -> void:
 	if _tipo_eh_caminho(tipo):
-		_modelo = _instanciar_modelo(CAMINHO_GRASS, "ModeloBase")
+		_modelo = _instanciar_modelo(CAMINHO_CHAO_CHAOS, "ModeloBase")
 		if _modelo == null:
 			return
 		add_child(_modelo)
@@ -123,7 +129,7 @@ func _carregar_modelo() -> void:
 	if _modelo == null:
 		return
 	add_child(_modelo)
-	if tipo == "colmeia-normal":
+	if _tipo_eh_colmeia(tipo):
 		_criar_colisao_colmeia_normal()
 
 
@@ -150,28 +156,32 @@ func _instanciar_modelo(caminho: String, nome_no: String) -> Node3D:
 func _obter_caminho_modelo(tipo_tile: String) -> String:
 	match tipo_tile:
 		"dirt":
-			return CAMINHO_DIRT
+			return CAMINHO_CHAO_CHAOS
 		"grass":
-			return CAMINHO_GRASS
+			return CAMINHO_CHAO_CHAOS
 		"grass-hill":
-			return CAMINHO_GRASS_HILL
+			return CAMINHO_CHAO_CHAOS
 		"grass-forest":
-			return CAMINHO_GRASS_FOREST
+			return CAMINHO_CHAO_CHAOS
 		"dirt-lumber":
-			return CAMINHO_DIRT_LUMBER
+			return CAMINHO_CHAO_CHAOS
 		"stone-rocks":
-			return CAMINHO_STONE_ROCKS
+			return CAMINHO_CHAO_CHAOS
 		"path-straight":
 			return CAMINHO_PATH_STRAIGHT
 		"path-corner":
 			return CAMINHO_PATH_CORNER
 		"path-crossing":
 			return CAMINHO_PATH_CROSSING
+		"path-casa":
+			return CAMINHO_PATH_CORNER
 		"colmeia-normal":
 			return CAMINHO_COLMEIA_HEX_NORMAL
+		"colmeia-rara":
+			return CAMINHO_COLMEIA_HEX_RARA
 		_:
 			push_warning("HexTile: tipo desconhecido '%s', usando grass." % tipo_tile)
-			return CAMINHO_GRASS
+			return CAMINHO_CHAO_CHAOS
 
 
 ## Retorna true quando o tipo visual representa um obstáculo sólido.
@@ -186,6 +196,12 @@ func _tipo_eh_caminho(tipo_tile: String) -> bool:
 	return tipo_tile == "path-straight" \
 		or tipo_tile == "path-corner" \
 		or tipo_tile == "path-crossing"
+
+
+## Retorna true quando o tipo visual representa um hexágono de colmeia.
+func _tipo_eh_colmeia(tipo_tile: String) -> bool:
+	return tipo_tile == "colmeia-normal" \
+		or tipo_tile == "colmeia-rara"
 
 
 # --- API PÚBLICA ---
