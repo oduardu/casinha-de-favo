@@ -7,7 +7,7 @@ class_name GerenciadorMundo
 # --- DADOS DO JOGADOR ---
 
 ## Saldo atual de moedas do jogador
-static var moedas: int = 500
+static var moedas: int = 10000
 
 ## Total histórico de mel coletado — nunca diminui, é estatística do jogo
 static var total_mel_coletado: int = 0

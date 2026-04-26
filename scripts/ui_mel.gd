@@ -137,6 +137,8 @@ func _criar_icone_3d(caminho: String, tamanho: Vector2i) -> SubViewportContainer
 		if cena != null:
 			var modelo: Node3D = cena.instantiate() as Node3D
 			modelo.name = "Modelo"
+			if caminho == CAMINHO_COIN:
+				modelo.rotation_degrees.y = 90.0
 			sv.add_child(modelo)
 
 	return svc
@@ -214,6 +216,7 @@ func _atualizar_digitos(grupo: Array[SubViewportContainer], valor: int) -> void:
 		if digito >= 0 and digito < _cenas_digitos.size() and _cenas_digitos[digito] != null:
 			var novo: Node3D = _cenas_digitos[digito].instantiate() as Node3D
 			novo.name = "Digito"
+			novo.rotation_degrees.y = 90.0
 			novo.set_meta("valor", digito)
 			sv.add_child(novo)
 			# Força re-render do SubViewport após trocar o modelo
@@ -228,6 +231,9 @@ func _conectar_sinais() -> void:
 	for colmeia in get_tree().get_nodes_in_group("colmeia"):
 		if colmeia.has_signal("mel_coletado"):
 			colmeia.mel_coletado.connect(func(_q: int) -> void: _atualizar_tudo())
+	for npc in get_tree().get_nodes_in_group("npc"):
+		if npc.has_signal("venda_realizada"):
+			npc.venda_realizada.connect(_atualizar_tudo)
 
 
 func _atualizar_tudo() -> void:
@@ -240,8 +246,4 @@ func _atualizar_tudo() -> void:
 func _contar_mel_inventario() -> int:
 	if _inventario == null:
 		return 0
-	var total := 0
-	for slot in _inventario.slots:
-		if not slot.esta_vazio() and slot.item.id == "mel":
-			total += slot.quantidade
-	return total
+	return _inventario.contar_total_mel()

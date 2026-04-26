@@ -1,120 +1,183 @@
 class_name Inventario
 extends Node
 
+# Inventário simplificado: sem hotbar e sem item na mão.
+# Mantém contagem por id e limite total de itens de mel na mochila.
+
+
 # --- SINAIS ---
-# Emitido sempre que o conteúdo do inventário muda — a HotbarUI escuta para redesenhar
+
+# Emitido sempre que o conteúdo do inventário muda
 signal inventario_mudou
-# Emitido quando o slot selecionado troca — a HotbarUI escuta para atualizar o destaque
+
+# Mantido por compatibilidade com scripts antigos que ainda conectam esse sinal
 signal slot_selecionado_mudou(novo_indice: int)
-# Emitido quando o item que está na mão muda — o player escuta para trocar o modelo 3D
+
+# Mantido por compatibilidade com scripts antigos que ainda conectam esse sinal
 signal item_na_mao_mudou(novo_item: Item)
 
 
 # --- CONFIGURAÇÃO ---
-@export var tamanho_hotbar: int = 6  # Quantos slots existem na hotbar
+
+# Capacidade inicial de mel na mochila do jogador
+@export var capacidade_mel_mochila: int = 30
 
 
 # --- ESTADO ---
-var slots: Array[SlotInventario] = []  # Array com todos os slots da hotbar
-var slot_selecionado: int = 0          # Índice do slot ativo no momento
+
+# Quantidade por id do item; ex: {"mel": 12, "flor": 3}
+var _quantidades_por_id: Dictionary = {}
+
+# Referência de Item por id para preservar metadados (valor_venda, tipo_interacao etc.)
+var _itens_por_id: Dictionary = {}
 
 
 func _ready() -> void:
-	# Registra no grupo para que a HotbarUI possa encontrar este nó sem referência direta
+	# Registra no grupo para a HUD localizar o inventário sem referência direta
 	add_to_group("inventario")
-
-	# Cria os slots vazios conforme o tamanho configurado
-	for i in tamanho_hotbar:
-		slots.append(SlotInventario.new())
-
-	# Emite o estado inicial para sincronizar qualquer UI já conectada
 	inventario_mudou.emit()
 
 
-# --- SELEÇÃO DE SLOT ---
+# --- API LEGADA (COMPATIBILIDADE) ---
 
-# Seleciona o slot pelo índice; ignora se o índice for inválido
-func selecionar_slot(indice: int) -> void:
-	if indice < 0 or indice >= tamanho_hotbar:
-		return
-	slot_selecionado = indice
-	slot_selecionado_mudou.emit(slot_selecionado)
-	item_na_mao_mudou.emit(obter_item_na_mao())
+# Hotbar foi removida, então não existe item na mão
+func obter_item_na_mao() -> Item:
+	return null
 
 
-# Avança para o próximo slot em loop circular
+# Hotbar foi removida, então essa operação não existe mais
+func remover_item_na_mao(_quantidade: int = 1) -> bool:
+	return false
+
+
+# Hotbar foi removida, função mantida só para não quebrar chamadas antigas
+func selecionar_slot(_indice: int) -> void:
+	return
+
+
+# Hotbar foi removida, função mantida só para não quebrar chamadas antigas
 func proximo_slot() -> void:
-	selecionar_slot((slot_selecionado + 1) % tamanho_hotbar)
+	return
 
 
-# Volta para o slot anterior em loop circular
+# Hotbar foi removida, função mantida só para não quebrar chamadas antigas
 func slot_anterior() -> void:
-	selecionar_slot((slot_selecionado - 1 + tamanho_hotbar) % tamanho_hotbar)
+	return
 
 
 # --- MANIPULAÇÃO DE ITENS ---
 
-# Retorna o item do slot selecionado, ou null se o slot estiver vazio
-func obter_item_na_mao() -> Item:
-	if slots.is_empty():
-		return null
-	return slots[slot_selecionado].item
-
-
-# Adiciona 'quantidade' unidades do item ao inventário.
-# Tenta empilhar em slots que já têm o mesmo item primeiro.
-# Depois preenche slots vazios. Retorna o que não coube (0 = tudo adicionado).
+# Adiciona itens no inventário e retorna o restante que não coube.
+# Para mel, respeita a capacidade da mochila.
 func adicionar_item(novo_item: Item, quantidade: int) -> int:
-	var restante := quantidade
+	if novo_item == null or quantidade <= 0:
+		return quantidade
 
-	# Tentativa 1: empilhar em slots existentes com o mesmo item
-	if novo_item.empilhavel:
-		for slot in slots:
-			if not slot.esta_vazio() and slot.item.id == novo_item.id:
-				restante = slot.adicionar(restante)
-				if restante <= 0:
-					inventario_mudou.emit()
-					return 0
+	var id_item: String = novo_item.id
+	if id_item.is_empty():
+		return quantidade
 
-	# Tentativa 2: preencher slots vazios
-	for slot in slots:
-		if slot.esta_vazio():
-			slot.item = novo_item
-			slot.quantidade = 0
-			restante = slot.adicionar(restante)
-			if restante <= 0:
-				inventario_mudou.emit()
-				return 0
+	var quantidade_atual: int = contar_item_por_id(id_item)
+	var quantidade_para_adicionar: int = quantidade
+	if _id_eh_mel(id_item):
+		var espaco_disponivel: int = maxi(capacidade_mel_mochila - contar_total_mel(), 0)
+		quantidade_para_adicionar = mini(quantidade, espaco_disponivel)
 
-	# O que sobrou não coube em nenhum slot
+	if quantidade_para_adicionar <= 0:
+		return quantidade
+
+	_quantidades_por_id[id_item] = quantidade_atual + quantidade_para_adicionar
+	_itens_por_id[id_item] = novo_item
 	inventario_mudou.emit()
-	return restante
+	item_na_mao_mudou.emit(null)
+	return quantidade - quantidade_para_adicionar
 
 
-# Remove 'quantidade' itens do slot selecionado.
-# Retorna true se conseguiu remover. Emite sinais para atualizar UI e modelo 3D.
-func remover_item_na_mao(quantidade: int = 1) -> bool:
-	if slots.is_empty():
+# Retorna quantas unidades de um item existem no inventário pelo id
+func contar_item_por_id(id_item: String) -> int:
+	if not _quantidades_por_id.has(id_item):
+		return 0
+	return maxi(int(_quantidades_por_id[id_item]), 0)
+
+
+# Retorna quantos itens de mel existem somando todos os tipos/raridades.
+func contar_total_mel() -> int:
+	var total: int = 0
+	for id_item_variant in _quantidades_por_id.keys():
+		var id_item: String = String(id_item_variant)
+		if not _id_eh_mel(id_item):
+			continue
+		total += contar_item_por_id(id_item)
+	return total
+
+
+# Remove uma quantidade específica por id e retorna quanto foi removido de fato
+func remover_item_por_id(id_item: String, quantidade: int) -> int:
+	if quantidade <= 0:
+		return 0
+
+	var atual: int = contar_item_por_id(id_item)
+	if atual <= 0:
+		return 0
+
+	var removidos: int = mini(quantidade, atual)
+	var restante: int = atual - removidos
+	if restante <= 0:
+		_quantidades_por_id.erase(id_item)
+		_itens_por_id.erase(id_item)
+	else:
+		_quantidades_por_id[id_item] = restante
+
+	inventario_mudou.emit()
+	item_na_mao_mudou.emit(null)
+	return removidos
+
+
+# Remove todas as unidades de um item pelo id e retorna a quantidade removida
+func remover_todos_por_id(id_item: String) -> int:
+	return remover_item_por_id(id_item, contar_item_por_id(id_item))
+
+
+# Retorna todos os ids de item presentes no inventário.
+func listar_ids_itens() -> Array[String]:
+	var ids: Array[String] = []
+	for id_item_variant in _quantidades_por_id.keys():
+		ids.append(String(id_item_variant))
+	return ids
+
+
+# Retorna a referência do item por id para acessar metadados
+func obter_item_por_id(id_item: String) -> Item:
+	if not _itens_por_id.has(id_item):
+		return null
+	return _itens_por_id[id_item] as Item
+
+
+# Retorna true quando existe pelo menos 1 item com o tipo_interacao informado
+func possui_item_com_tipo_interacao(tipo_interacao: String) -> bool:
+	for id_item in _quantidades_por_id.keys():
+		var quantidade: int = contar_item_por_id(String(id_item))
+		if quantidade <= 0:
+			continue
+		var item: Item = obter_item_por_id(String(id_item))
+		if item != null and item.tipo_interacao == tipo_interacao:
+			return true
+	return false
+
+
+# Consome a quantidade pedida do primeiro item encontrado com esse tipo_interacao
+func consumir_item_por_tipo_interacao(tipo_interacao: String, quantidade: int = 1) -> bool:
+	if quantidade <= 0:
 		return false
-	var sucesso := slots[slot_selecionado].remover(quantidade)
-	if sucesso:
-		inventario_mudou.emit()
-		item_na_mao_mudou.emit(obter_item_na_mao())
-	return sucesso
+	for id_item in _quantidades_por_id.keys():
+		var item: Item = obter_item_por_id(String(id_item))
+		if item == null or item.tipo_interacao != tipo_interacao:
+			continue
+		var removidos: int = remover_item_por_id(String(id_item), quantidade)
+		return removidos == quantidade
+	return false
 
 
-# --- INPUT ---
-
-# Captura as teclas de seleção de slot (1–6, Q, scroll do mouse)
-func _unhandled_input(event: InputEvent) -> void:
-	# Teclas numéricas selecionam diretamente o slot correspondente
-	for i in tamanho_hotbar:
-		if event.is_action_pressed("hotbar_%d" % (i + 1)):
-			selecionar_slot(i)
-			get_viewport().set_input_as_handled()
-			return
-
-	# Tecla Q: slot anterior
-	if event.is_action_pressed("slot_anterior"):
-		slot_anterior()
-		get_viewport().set_input_as_handled()
+# Retorna true quando o id representa um item de mel (comum ou raridades).
+func _id_eh_mel(id_item: String) -> bool:
+	return id_item.begins_with("mel")

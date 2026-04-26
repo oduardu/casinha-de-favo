@@ -14,6 +14,9 @@ signal jogador_entrou_npc
 ## Emitido quando um CharacterBody3D sai da área de detecção do NPC
 signal jogador_saiu_npc
 
+## Emitido quando uma venda é concluída com sucesso
+signal venda_realizada
+
 
 # --- REFERÊNCIAS INTERNAS ---
 
@@ -114,27 +117,21 @@ func _ao_sair_area(body: Node3D) -> void:
 # --- VENDA ---
 
 ## Chamada pelo Player ao pressionar E próximo ao NPC.
-## Verifica se o item na mão tem valor_venda > 0 e executa a venda.
+## Vende todo o mel do inventário de uma vez.
 ## Retorna true se a venda foi realizada com sucesso.
 func tentar_vender(jogador: Node) -> bool:
 	var inv: Node = jogador.get_node_or_null("Inventario")
 	if inv == null:
 		return false
 
-	# Verifica se o item na mão tem valor de venda
-	var item_mao: Item = inv.obter_item_na_mao()
-	if item_mao == null or item_mao.valor_venda <= 0:
+	var valor_total: int = _calcular_valor_total_mel(inv)
+	if valor_total <= 0:
 		_animar_recusa()
 		return false
 
-	# Guarda o valor antes de remover (o slot pode esvaziar)
-	var valor: int = item_mao.valor_venda
-
-	# Remove 1 unidade do inventário e paga o jogador
-	if not inv.remover_item_na_mao(1):
-		return false
-
-	GerenciadorMundo.adicionar_moedas(valor)
+	_remover_todos_os_mels(inv)
+	GerenciadorMundo.adicionar_moedas(valor_total)
+	venda_realizada.emit()
 	_animar_venda()
 	_atualizar_hint()
 	return true
@@ -152,13 +149,36 @@ func _atualizar_hint() -> void:
 		_hint_label.text = "..."
 		return
 
-	var item_mao: Item = inv.obter_item_na_mao()
-	if item_mao != null and item_mao.valor_venda > 0:
-		_hint_label.text = "E — Vender %s (%d moeda)" % [item_mao.nome_exibicao, item_mao.valor_venda]
+	var valor_total: int = _calcular_valor_total_mel(inv)
+	if valor_total > 0:
+		_hint_label.text = "E — Vender todo mel (%d moeda)" % valor_total
 		_hint_label.modulate = Color(1.0, 0.88, 0.15)  # Amarelo dourado
 	else:
 		_hint_label.text = "Compro mel!"
 		_hint_label.modulate = Color(0.75, 0.65, 0.85)  # Lilás suave
+
+
+## Calcula o valor total de venda considerando todos os tipos de mel no inventário.
+func _calcular_valor_total_mel(inv: Node) -> int:
+	var total: int = 0
+	for id_item in inv.listar_ids_itens():
+		if not String(id_item).begins_with("mel"):
+			continue
+		var quantidade: int = inv.contar_item_por_id(id_item)
+		if quantidade <= 0:
+			continue
+		var item: Item = inv.obter_item_por_id(id_item)
+		if item == null:
+			continue
+		total += quantidade * maxi(item.valor_venda, 1)
+	return total
+
+
+## Remove todos os itens de mel (incluindo raridades) do inventário.
+func _remover_todos_os_mels(inv: Node) -> void:
+	for id_item in inv.listar_ids_itens():
+		if String(id_item).begins_with("mel"):
+			inv.remover_todos_por_id(id_item)
 
 
 ## Atualiza o hint quando o inventário do jogador muda (item trocado, mel vendido, etc.)

@@ -24,13 +24,37 @@ const CAMINHO_DIRT := "res://obj/kenney_hexagonal/dirt.glb"
 ## Caminho do modelo GLB do tile de grama (externo / bloqueado)
 const CAMINHO_GRASS := "res://obj/kenney_hexagonal/grass.glb"
 
+## Caminho do modelo GLB do tile de grama com relevo
+const CAMINHO_GRASS_HILL := "res://obj/kenney_hexagonal/grass-hill.glb"
+
+## Caminho do modelo GLB do tile de floresta
+const CAMINHO_GRASS_FOREST := "res://obj/kenney_hexagonal/grass-forest.glb"
+
+## Caminho do modelo GLB do tile com madeira
+const CAMINHO_DIRT_LUMBER := "res://obj/kenney_hexagonal/dirt-lumber.glb"
+
+## Caminho do modelo GLB do tile com pedras
+const CAMINHO_STONE_ROCKS := "res://obj/kenney_hexagonal/stone-rocks.glb"
+
+## Caminho do modelo GLB de trilha reta
+const CAMINHO_PATH_STRAIGHT := "res://obj/kenney_hexagonal/path-straight.glb"
+
+## Caminho do modelo GLB de curva de trilha
+const CAMINHO_PATH_CORNER := "res://obj/kenney_hexagonal/path-corner.glb"
+
+## Caminho do modelo GLB de cruzamento de trilha
+const CAMINHO_PATH_CROSSING := "res://obj/kenney_hexagonal/path-crossing.glb"
+
+## Caminho do modelo GLB do hexágono de colmeia normal
+const CAMINHO_COLMEIA_HEX_NORMAL := "res://obj/colmeias/hexagonal_colmeia_normal.glb"
+
 
 # --- VARIÁVEIS DE ESTADO ---
 
 ## Coordenada axial (q, r) do tile na grade hexagonal
 var coordenada: Vector2i
 
-## Tipo do tile: "dirt" para jogável, "grass" para externo bloqueado
+## Tipo visual do tile (ex.: "grass", "grass-hill", "grass-forest", "dirt-lumber", "stone-rocks")
 var tipo: String = "dirt"
 
 ## Se true, o tile está desbloqueado e o jogador pode construir nele
@@ -51,6 +75,12 @@ var _corpo_bloqueio: StaticBody3D = null
 ## Area3D que detecta a proximidade do jogador para exibir a UI de compra
 var _area_compra: Area3D = null
 
+## StaticBody3D para colisão de obstáculo em tiles decorativos do mapa inicial
+var _corpo_obstaculo: StaticBody3D = null
+
+## StaticBody3D para colisões específicas do modelo de hexágono de colmeia
+var _corpo_colmeia_normal: StaticBody3D = null
+
 ## Label3D flutuante mostrando o preço do tile (visível quando o jogador está próximo)
 var _label_preco: Label3D = null
 
@@ -62,6 +92,8 @@ var _label_erro: Label3D = null
 
 func _ready() -> void:
 	_carregar_modelo()
+	if desbloqueado and _tipo_bloqueia_passagem(tipo):
+		_criar_colisao_obstaculo()
 	if not desbloqueado:
 		_aplicar_cor_morta()
 		_criar_bloqueio()
@@ -73,17 +105,87 @@ func _ready() -> void:
 
 ## Carrega o GLB correspondente ao tipo do tile, aplica escala e posicionamento vertical
 func _carregar_modelo() -> void:
-	var caminho := CAMINHO_DIRT if tipo == "dirt" else CAMINHO_GRASS
-	var recurso = load(caminho)
-	if recurso == null:
-		push_error("HexTile: não foi possível carregar modelo em '%s'." % caminho)
+	if _tipo_eh_caminho(tipo):
+		_modelo = _instanciar_modelo(CAMINHO_GRASS, "ModeloBase")
+		if _modelo == null:
+			return
+		add_child(_modelo)
+
+		var modelo_caminho := _instanciar_modelo(_obter_caminho_modelo(tipo), "ModeloCaminho")
+		if modelo_caminho == null:
+			return
+		# Leve offset para evitar z-fighting entre o chão base e o path
+		modelo_caminho.position.y += 0.03
+		add_child(modelo_caminho)
 		return
 
-	_modelo = recurso.instantiate() as Node3D
-	_modelo.scale = Vector3(TILE_SCALE, TILE_SCALE, TILE_SCALE)
-	# Desloca o modelo para baixo de modo que a superfície superior fique em y=0
-	_modelo.position.y = -0.2 * TILE_SCALE
+	_modelo = _instanciar_modelo(_obter_caminho_modelo(tipo), "Modelo")
+	if _modelo == null:
+		return
 	add_child(_modelo)
+	if tipo == "colmeia-normal":
+		_criar_colisao_colmeia_normal()
+
+
+## Instancia um modelo de tile, aplica escala padrão e offset vertical de alinhamento.
+func _instanciar_modelo(caminho: String, nome_no: String) -> Node3D:
+	var recurso: Resource = load(caminho)
+	if recurso == null:
+		push_error("HexTile: não foi possível carregar modelo em '%s'." % caminho)
+		return null
+
+	var modelo := recurso.instantiate() as Node3D
+	if modelo == null:
+		push_error("HexTile: falha ao instanciar modelo em '%s'." % caminho)
+		return null
+	modelo.name = nome_no
+	modelo.scale = Vector3(TILE_SCALE, TILE_SCALE, TILE_SCALE)
+	# Desloca o modelo para baixo de modo que a superfície superior fique em y=0
+	modelo.position.y = -0.2 * TILE_SCALE
+	return modelo
+
+
+## Resolve o tipo de tile para o caminho do GLB correspondente.
+## Em caso de tipo desconhecido, mantém fallback para grass para evitar tile invisível.
+func _obter_caminho_modelo(tipo_tile: String) -> String:
+	match tipo_tile:
+		"dirt":
+			return CAMINHO_DIRT
+		"grass":
+			return CAMINHO_GRASS
+		"grass-hill":
+			return CAMINHO_GRASS_HILL
+		"grass-forest":
+			return CAMINHO_GRASS_FOREST
+		"dirt-lumber":
+			return CAMINHO_DIRT_LUMBER
+		"stone-rocks":
+			return CAMINHO_STONE_ROCKS
+		"path-straight":
+			return CAMINHO_PATH_STRAIGHT
+		"path-corner":
+			return CAMINHO_PATH_CORNER
+		"path-crossing":
+			return CAMINHO_PATH_CROSSING
+		"colmeia-normal":
+			return CAMINHO_COLMEIA_HEX_NORMAL
+		_:
+			push_warning("HexTile: tipo desconhecido '%s', usando grass." % tipo_tile)
+			return CAMINHO_GRASS
+
+
+## Retorna true quando o tipo visual representa um obstáculo sólido.
+func _tipo_bloqueia_passagem(tipo_tile: String) -> bool:
+	return tipo_tile == "grass-forest" \
+		or tipo_tile == "dirt-lumber" \
+		or tipo_tile == "stone-rocks"
+
+
+## Retorna true quando o tipo visual é um path usado como sobreposição de trilha.
+func _tipo_eh_caminho(tipo_tile: String) -> bool:
+	return tipo_tile == "path-straight" \
+		or tipo_tile == "path-corner" \
+		or tipo_tile == "path-crossing"
 
 
 # --- API PÚBLICA ---
@@ -91,6 +193,71 @@ func _carregar_modelo() -> void:
 ## Retorna true se o tile está desbloqueado e pode receber construções
 func pode_construir() -> bool:
 	return desbloqueado
+
+
+## Troca o tipo visual do tile em tempo de execução e recarrega o(s) modelo(s) 3D.
+func definir_tipo_visual(novo_tipo: String) -> void:
+	tipo = novo_tipo
+	_limpar_modelos_visuais()
+	_carregar_modelo()
+
+
+## Remove os nós de modelo visual atuais para permitir recarga limpa do tipo.
+func _limpar_modelos_visuais() -> void:
+	_limpar_colisao_colmeia_normal()
+	for filho in get_children():
+		if not (filho is Node3D):
+			continue
+		var nome_filho: String = String(filho.name)
+		if nome_filho == "Modelo" or nome_filho == "ModeloBase" or nome_filho == "ModeloCaminho":
+			filho.queue_free()
+	_modelo = null
+
+
+## Cria colisão apenas para os meshes "Cylinder" e "Cylinder_001" do hex de colmeia.
+func _criar_colisao_colmeia_normal() -> void:
+	_limpar_colisao_colmeia_normal()
+	if _modelo == null:
+		return
+
+	_corpo_colmeia_normal = StaticBody3D.new()
+	_corpo_colmeia_normal.name = "ColisaoColmeiaNormal"
+	add_child(_corpo_colmeia_normal)
+
+	var nomes_mesh: Array[String] = ["Cylinder", "Cylinder_001"]
+	var meshes_alvo: Array[MeshInstance3D] = _coletar_meshes_por_nome(_modelo, nomes_mesh)
+	for mesh_alvo in meshes_alvo:
+		if mesh_alvo == null or mesh_alvo.mesh == null:
+			continue
+		var shape: ConvexPolygonShape3D = mesh_alvo.mesh.create_convex_shape()
+		if shape == null:
+			continue
+		var colisao := CollisionShape3D.new()
+		colisao.shape = shape
+		_corpo_colmeia_normal.add_child(colisao)
+		colisao.global_transform = mesh_alvo.global_transform
+
+
+## Remove o corpo de colisão do hex de colmeia, se existir.
+func _limpar_colisao_colmeia_normal() -> void:
+	if is_instance_valid(_corpo_colmeia_normal):
+		_corpo_colmeia_normal.queue_free()
+		_corpo_colmeia_normal = null
+
+
+## Coleta recursivamente MeshInstance3D cujo nome está em 'nomes'.
+func _coletar_meshes_por_nome(raiz: Node, nomes: Array[String]) -> Array[MeshInstance3D]:
+	var resultado: Array[MeshInstance3D] = []
+	_coletar_meshes_por_nome_recursivo(raiz, nomes, resultado)
+	return resultado
+
+
+## Implementação recursiva de busca de meshes por nome.
+func _coletar_meshes_por_nome_recursivo(no: Node, nomes: Array[String], saida: Array[MeshInstance3D]) -> void:
+	if no is MeshInstance3D and nomes.has(String(no.name)):
+		saida.append(no as MeshInstance3D)
+	for filho in no.get_children():
+		_coletar_meshes_por_nome_recursivo(filho, nomes, saida)
 
 
 ## Desbloqueia o tile: remove obstáculos, restaura a cor e emite o sinal 'comprado'
@@ -192,6 +359,24 @@ func _aplicar_material_recursivo(no: Node, material) -> void:
 
 
 # --- CRIAÇÃO DE FÍSICA ---
+
+## Cria uma colisão central para tiles decorativos com obstáculo.
+## A largura foi calibrada para bloquear o objeto sem fechar totalmente os corredores.
+func _criar_colisao_obstaculo() -> void:
+	_corpo_obstaculo = StaticBody3D.new()
+	_corpo_obstaculo.name = "ObstaculoFisico"
+
+	var forma := CylinderShape3D.new()
+	forma.radius = 0.9 * TILE_SCALE / 3.0
+	forma.height = 1.8
+
+	var colisao := CollisionShape3D.new()
+	colisao.shape = forma
+	colisao.position.y = 0.9
+
+	_corpo_obstaculo.add_child(colisao)
+	add_child(_corpo_obstaculo)
+
 
 ## Cria um StaticBody3D com CylinderShape3D para impedir o jogador de caminhar
 ## sobre o tile enquanto ele estiver bloqueado

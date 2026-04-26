@@ -52,7 +52,7 @@ func pode_plantar() -> bool:
 
 
 # Ponto de entrada da interação: chamado pelo player ao pressionar E dentro da área.
-# Valida se o jogador tem o item certo na mão, consome o item e inicia o plantio.
+# Valida se o jogador tem um item compatível no inventário, consome 1 unidade e inicia o plantio.
 # Retorna true se a interação foi aceita (para o player iniciar a animação do seu lado).
 func tentar_interagir(jogador: Node) -> bool:
 	# Tile já usado ou em processo — não aceita nova interação
@@ -65,16 +65,16 @@ func tentar_interagir(jogador: Node) -> bool:
 		push_warning("farm_tile: jogador não tem nó 'Inventario'")
 		return false
 
-	var item_na_mao = inv.obter_item_na_mao()
-
-	# Valida se o item existe e tem o tipo de interação correto
-	if item_na_mao == null or item_na_mao.tipo_interacao != tipo_interacao_aceita:
+	# Valida se existe item no inventário com o tipo de interação correto
+	if not inv.possui_item_com_tipo_interacao(tipo_interacao_aceita):
 		var nome_necessario := "uma flor" if tipo_interacao_aceita == "plantar" else tipo_interacao_aceita
 		_mostrar_erro("Precisa de " + nome_necessario)
 		return false
 
-	# Consome 1 unidade do item do inventário do jogador
-	inv.remover_item_na_mao(1)
+	# Consome 1 unidade do item compatível no inventário do jogador
+	if not inv.consumir_item_por_tipo_interacao(tipo_interacao_aceita, 1):
+		_mostrar_erro("Nao foi possivel consumir o item.")
+		return false
 
 	# Inicia o estado de plantio e esconde o hint
 	iniciar_plantio()

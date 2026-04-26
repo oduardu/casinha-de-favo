@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://cb5b31l1aspsd"
-path="res://.godot/imported/coin.glb-0a52b008e2e613e26941b9bf8a063d36.scn"
+uid="uid://8ta32s3ipjpu"
+path="res://.godot/imported/hexagonal_colmeia_normal.glb-404a55f50078075bcace8969478b1447.scn"
 
 [deps]
 
-source_file="res://obj/kenney_ui/coins/coin.glb"
-dest_files=["res://.godot/imported/coin.glb-0a52b008e2e613e26941b9bf8a063d36.scn"]
+source_file="res://obj/colmeias/hexagonal_colmeia_normal.glb"
+dest_files=["res://.godot/imported/hexagonal_colmeia_normal.glb-404a55f50078075bcace8969478b1447.scn"]
 
 [params]
 
@@ -17,7 +17,7 @@ nodes/root_type=""
 nodes/root_name=""
 nodes/root_script=null
 nodes/apply_root_scale=true
-nodes/root_scale=0.001
+nodes/root_scale=1.0
 nodes/import_as_skeleton_bones=false
 nodes/use_name_suffixes=true
 nodes/use_node_type_suffixes=true

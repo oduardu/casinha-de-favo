@@ -9,7 +9,7 @@ extends Node3D
 @export var preco_base: int = 10
 
 ## Moedas iniciais adicionadas ao GerenciadorMundo na primeira inicialização do jogo
-@export var moedas_debug: int = 500
+@export var moedas_debug: int = 10000
 
 
 # --- CONSTANTES ---
@@ -31,6 +31,43 @@ const R_MAX := 2
 
 ## Raio do hexágono em unidades de mundo (metade da distância entre centros opostos)
 const HEX_RAIO := TILE_SCALE * 0.58
+
+## Tipos visuais usados apenas no grid inicial para dar variedade ao mapa inicial
+const TIPOS_VISUAIS_INICIAIS := [
+	"grass-hill",
+	"grass-forest",
+	"dirt-lumber",
+	"stone-rocks",
+]
+
+## Coordenadas do corredor principal do mapa inicial.
+## Esses tiles sempre usam assets de caminho e ficam sem obstáculos de colisão.
+const COORDS_CAMINHO_LIVRE: Array[Vector2i] = [
+	Vector2i(-1, -1), # Casa
+	Vector2i(0, -1),  # NPC
+	Vector2i(0, 0),   # Colmeia
+	Vector2i(1, 0),
+	Vector2i(1, 1),
+	Vector2i(2, 1),
+	Vector2i(2, 2),
+]
+
+## Chance fixa de spawnar uma colmeia ao comprar um novo hexágono (25%)
+const CHANCE_SPAWN_COLMEIA_EM_COMPRA: float = 0.25
+
+## Raridades possíveis para colmeias geradas em compra de terreno
+const RARIDADES_COLMEIA_SORTEIO: Array[String] = ["comum", "incomum", "rara", "epica", "lendaria"]
+
+## Distribuição de raridade no centro do mapa (soma 100%).
+## Predomínio de comum conforme solicitado.
+const DISTRIBUICAO_RARIDADE_CENTRO: Array[float] = [65.0, 22.0, 8.0, 4.0, 1.0]
+
+## Distribuição de raridade no limite do mapa (soma 100%).
+## Comum reduz, demais raridades aumentam ao se afastar.
+const DISTRIBUICAO_RARIDADE_BORDA: Array[float] = [35.0, 30.0, 18.0, 11.0, 6.0]
+
+## Tipo visual de hexágono usado nos tiles que possuem colmeia
+const TIPO_TILE_COLMEIA_NORMAL: String = "colmeia-normal"
 
 
 # --- ESTADO ---
@@ -56,6 +93,9 @@ var _piso_corpo: StaticBody3D = null
 ## Menu de pausa criado em runtime (CanvasLayer com botões)
 var _menu_pausa: CanvasLayer = null
 
+## RNG para eventos de geração procedural (spawn de colmeia e raridade)
+var _rng_eventos: RandomNumberGenerator = RandomNumberGenerator.new()
+
 
 # --- CICLO DE VIDA ---
 
@@ -70,9 +110,10 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_carregar_recursos()
 	GerenciadorMundo.carregar()
-	# Garante que o jogador começa com pelo menos moedas_debug moedas
+	# Garante que o jogador começa com pelo menos moedas_debug moedas @todo remover
 	if GerenciadorMundo.moedas < moedas_debug:
 		GerenciadorMundo.moedas = moedas_debug
+	_rng_eventos.randomize()
 	_calcular_deslocamento()
 	_gerar_grade_inicial()
 	_gerar_tiles_externos()
@@ -80,7 +121,7 @@ func _ready() -> void:
 	_reconstruir_navmesh()
 	_criar_piso()
 	_colocar_edificios()
-	_setup_hotbar()
+	_setup_ui()
 	_criar_menu_pausa()
 
 	# Conecta o PathVisualizer ao NavigationAgent3D do jogador
@@ -175,11 +216,37 @@ func _calcular_deslocamento() -> void:
 		_deslocamento_centro.y = 0.0
 
 
-## Gera os 16 tiles jogáveis da grade inicial (grass, desbloqueados)
+## Gera os 16 tiles jogáveis da grade inicial com variação visual e sem custo
 func _gerar_grade_inicial() -> void:
 	for q in range(Q_MIN, Q_MAX + 1):
 		for r in range(R_MIN, R_MAX + 1):
-			_criar_tile(Vector2i(q, r), "grass", true, 0)
+			var coord := Vector2i(q, r)
+			_criar_tile(coord, _escolher_tipo_visual_inicial(coord), true, 0)
+
+
+## Retorna o tipo visual do tile inicial com base na coordenada axial.
+## Garante um corredor livre com assets de caminho e usa variedade no restante.
+func _escolher_tipo_visual_inicial(coord: Vector2i) -> String:
+	if coord == Vector2i(0, 0):
+		return TIPO_TILE_COLMEIA_NORMAL
+	if COORDS_CAMINHO_LIVRE.has(coord):
+		return _escolher_tipo_caminho(coord)
+
+	var indice_base: int = abs(coord.x * 31 + coord.y * 17 + coord.x * coord.y * 7)
+	return TIPOS_VISUAIS_INICIAIS[indice_base % TIPOS_VISUAIS_INICIAIS.size()]
+
+
+## Retorna uma variação visual de caminho para o corredor livre.
+func _escolher_tipo_caminho(coord: Vector2i) -> String:
+	var indice: int = COORDS_CAMINHO_LIVRE.find(coord)
+	if indice < 0:
+		return "path-straight"
+
+	if indice == 2:
+		return "path-crossing"
+	if indice % 3 == 0:
+		return "path-corner"
+	return "path-straight"
 
 
 ## Gera os tiles externos bloqueados (grass) ao redor da grade inicial,
@@ -228,7 +295,9 @@ func _criar_tile(coord: Vector2i, tipo: String, eh_desbloqueado: bool, custo: in
 				)
 			if jogador.has_method("_ao_sair_hex_compravel"):
 				tile.jogador_saiu_compravel.connect(jogador._ao_sair_hex_compravel)
-		tile.comprado.connect(_ao_tile_comprado)
+		tile.comprado.connect(
+			func(custo: int) -> void: _ao_tile_comprado(tile, custo)
+		)
 
 
 ## Aplica o estado do save: desbloqueia sem custo os tiles já comprados anteriormente
@@ -269,8 +338,8 @@ func _coletar_centros_desbloqueados() -> Array[Vector2]:
 	return centros
 
 
-## Cria o chão plano sob a área jogável, dimensionado a partir
-## do bounding box dos hexágonos desbloqueados
+## Cria apenas o chão físico sob a área jogável, dimensionado a partir
+## do bounding box dos hexágonos desbloqueados (sem piso visual artificial)
 func _criar_piso() -> void:
 	if is_instance_valid(_piso_corpo):
 		_piso_corpo.queue_free()
@@ -309,18 +378,6 @@ func _criar_piso() -> void:
 	colisao.shape = forma
 	colisao.position = Vector3(cx, -0.05, cz)
 	_piso_corpo.add_child(colisao)
-
-	# Visual: PlaneMesh verde-grama cobrindo toda a área
-	var mesh_piso := MeshInstance3D.new()
-	mesh_piso.name = "MeshPisoVisual"
-	var plano := PlaneMesh.new()
-	plano.size = Vector2(largura * 1.4, profund * 1.4)
-	mesh_piso.mesh = plano
-	var mat_piso := StandardMaterial3D.new()
-	mat_piso.albedo_color = Color(0.22, 0.52, 0.18)
-	mesh_piso.material_override = mat_piso
-	mesh_piso.position = Vector3(cx, -0.30, cz)
-	_piso_corpo.add_child(mesh_piso)
 
 	add_child(_piso_corpo)
 
@@ -373,6 +430,7 @@ func _reconstruir_navmesh() -> void:
 func _colocar_edificios() -> void:
 	_criar_casa()
 	_criar_colmeia()
+	_recriar_colmeias_dinamicas_salvas()
 	_criar_npc()
 
 
@@ -416,15 +474,28 @@ func _criar_casa() -> void:
 
 ## Instancia a Colmeia no tile (0, 0) e conecta seus sinais de proximidade ao Player
 func _criar_colmeia() -> void:
+	_criar_colmeia_em_coord(Vector2i(0, 0), "colmeia_principal", "comum")
+
+
+## Cria uma colmeia em uma coordenada axial específica com id e raridade definidos.
+func _criar_colmeia_em_coord(coord: Vector2i, id_colmeia: String, raridade: String) -> Node3D:
 	if _colmeia_cena_script == null:
 		push_warning("mundo.gd: script colmeia.gd não carregado — colmeia não será criada.")
-		return
+		return null
+	if _buscar_colmeia_por_id(id_colmeia) != null:
+		return null
+	var tile: HexTile = obter_tile(coord)
+	if tile != null and tile.has_method("definir_tipo_visual"):
+		tile.definir_tipo_visual(TIPO_TILE_COLMEIA_NORMAL)
 
 	var colmeia := Node3D.new()
-	colmeia.name = "Colmeia"
+	colmeia.name = "Colmeia_%s" % id_colmeia
 	colmeia.set_script(_colmeia_cena_script)
-	colmeia.position = _axial_para_mundo(0, 0)
+	colmeia.id_colmeia = id_colmeia
+	colmeia.position = _axial_para_mundo(coord.x, coord.y)
 	colmeia.position.y = 0.0
+	if colmeia.has_method("configurar_raridade_colmeia"):
+		colmeia.configurar_raridade_colmeia(raridade)
 	add_child(colmeia)
 
 	var jogador := get_node_or_null("Player")
@@ -435,6 +506,28 @@ func _criar_colmeia() -> void:
 			)
 		if colmeia.has_signal("jogador_saiu_colmeia") and jogador.has_method("_ao_sair_colmeia_area"):
 			colmeia.jogador_saiu_colmeia.connect(jogador._ao_sair_colmeia_area)
+	return colmeia
+
+
+## Recria colmeias dinâmicas já existentes no save em seus respectivos hexágonos.
+func _recriar_colmeias_dinamicas_salvas() -> void:
+	for chave in GerenciadorMundo.estado_colmeias.keys():
+		if not (chave is String):
+			continue
+		var id_colmeia: String = chave
+		if id_colmeia == "colmeia_principal":
+			continue
+		var coord: Vector2i = _extrair_coord_de_id_colmeia(id_colmeia)
+		if coord == Vector2i(999999, 999999):
+			continue
+		var tile: HexTile = obter_tile(coord)
+		if tile == null or not tile.desbloqueado:
+			continue
+		if _buscar_colmeia_por_id(id_colmeia) != null:
+			continue
+		var dados_colmeia: Dictionary = GerenciadorMundo.carregar_estado_colmeia(id_colmeia)
+		var raridade: String = str(dados_colmeia.get("raridade_colmeia", "comum"))
+		_criar_colmeia_em_coord(coord, id_colmeia, raridade)
 
 
 ## Instancia um Node3D com o script NPC na frente da casa (tile 0, -1).
@@ -463,32 +556,103 @@ func _criar_npc() -> void:
 		var inv: Node = jogador.get_node_or_null("Inventario")
 		if inv != null and inv.has_signal("inventario_mudou") and npc.has_method("_ao_inventario_mudou"):
 			inv.inventario_mudou.connect(npc._ao_inventario_mudou)
-		if inv != null and inv.has_signal("item_na_mao_mudou") and npc.has_method("_ao_inventario_mudou"):
-			inv.item_na_mao_mudou.connect(func(_item: Item) -> void: npc._ao_inventario_mudou())
 
 
 # --- COMPRA DE HEX ---
 
 ## Chamado quando um tile externo é comprado com sucesso.
-## Reconstrói a navmesh e o piso baseado nos novos hexágonos desbloqueados.
-func _ao_tile_comprado(_custo: int) -> void:
+## Reconstrói navmesh/piso e tenta spawnar colmeia dinâmica no novo hex.
+func _ao_tile_comprado(tile: HexTile, _custo: int) -> void:
 	_reconstruir_navmesh()
 	_criar_piso()
+	_tentar_spawn_colmeia_em_compra(tile)
 
 
-# --- HOTBAR E INVENTÁRIO ---
+## Tenta spawnar uma colmeia ao comprar um hexágono, respeitando a chance fixa de 25%.
+func _tentar_spawn_colmeia_em_compra(tile: HexTile) -> void:
+	if tile == null or not tile.desbloqueado:
+		return
+	if _rng_eventos.randf() > CHANCE_SPAWN_COLMEIA_EM_COMPRA:
+		return
+	var id_colmeia: String = _obter_id_colmeia_para_coord(tile.coordenada)
+	if _buscar_colmeia_por_id(id_colmeia) != null:
+		return
+	var raridade: String = _sortear_raridade_colmeia(tile.coordenada)
+	_criar_colmeia_em_coord(tile.coordenada, id_colmeia, raridade)
 
-## Cria o CanvasLayer de UI com a hotbar e o contador de mel
-func _setup_hotbar() -> void:
+
+## Sorteia a raridade da colmeia com distribuição percentual que varia por distância.
+## No centro: comum predomina (65%). Na borda: comum cai e as demais sobem.
+func _sortear_raridade_colmeia(coord: Vector2i) -> String:
+	if RARIDADES_COLMEIA_SORTEIO.is_empty():
+		return "comum"
+	if RARIDADES_COLMEIA_SORTEIO.size() != DISTRIBUICAO_RARIDADE_CENTRO.size():
+		return "comum"
+	if RARIDADES_COLMEIA_SORTEIO.size() != DISTRIBUICAO_RARIDADE_BORDA.size():
+		return "comum"
+
+	var fator_distancia: float = _obter_fator_distancia_spawn(coord)
+	var distribuicao: Array[float] = []
+	for i in RARIDADES_COLMEIA_SORTEIO.size():
+		var perc_centro: float = maxf(DISTRIBUICAO_RARIDADE_CENTRO[i], 0.0)
+		var perc_borda: float = maxf(DISTRIBUICAO_RARIDADE_BORDA[i], 0.0)
+		distribuicao.append(lerpf(perc_centro, perc_borda, fator_distancia))
+
+	var soma_distribuicao: float = 0.0
+	for percentual in distribuicao:
+		soma_distribuicao += maxf(percentual, 0.0)
+	if soma_distribuicao <= 0.0:
+		return "comum"
+
+	# Normaliza para garantir 100% efetivo mesmo com float/interpolação.
+	var fator_normalizacao: float = 100.0 / soma_distribuicao
+	var alvo: float = _rng_eventos.randf_range(0.0, 100.0)
+	var acumulado: float = 0.0
+	for i in RARIDADES_COLMEIA_SORTEIO.size():
+		acumulado += maxf(distribuicao[i], 0.0) * fator_normalizacao
+		if alvo <= acumulado:
+			return RARIDADES_COLMEIA_SORTEIO[i]
+	return RARIDADES_COLMEIA_SORTEIO[0]
+
+
+## Retorna um fator [0..1] da distância ao spawn para ajustar chance de raridade.
+func _obter_fator_distancia_spawn(coord: Vector2i) -> float:
+	var dist: int = _hex_dist(coord, Vector2i(0, 0))
+	var dist_max: float = maxf(float(raio_mundo_externo), 1.0)
+	return clampf(float(dist) / dist_max, 0.0, 1.0)
+
+
+## Retorna o ID canônico da colmeia para uma coordenada axial.
+func _obter_id_colmeia_para_coord(coord: Vector2i) -> String:
+	return "colmeia_%d_%d" % [coord.x, coord.y]
+
+
+## Extrai coordenada axial de um id no formato colmeia_q_r.
+func _extrair_coord_de_id_colmeia(id_colmeia: String) -> Vector2i:
+	var partes: PackedStringArray = id_colmeia.split("_")
+	if partes.size() != 3 or partes[0] != "colmeia":
+		return Vector2i(999999, 999999)
+	if not partes[1].is_valid_int() or not partes[2].is_valid_int():
+		return Vector2i(999999, 999999)
+	return Vector2i(int(partes[1]), int(partes[2]))
+
+
+## Busca colmeia existente no mundo pelo id lógico.
+func _buscar_colmeia_por_id(id_colmeia: String) -> Node3D:
+	for no_colmeia in get_tree().get_nodes_in_group("colmeia"):
+		if not (no_colmeia is Node3D):
+			continue
+		if String(no_colmeia.id_colmeia) == id_colmeia:
+			return no_colmeia as Node3D
+	return null
+
+
+# --- UI ---
+
+## Cria o CanvasLayer de UI com contador de moedas/mel
+func _setup_ui() -> void:
 	var canvas := CanvasLayer.new()
 	canvas.name = "UILayer"
-
-	if ResourceLoader.exists("res://scenes/hotbar.tscn"):
-		var hotbar_cena: PackedScene = load("res://scenes/hotbar.tscn")
-		if hotbar_cena != null:
-			canvas.add_child(hotbar_cena.instantiate())
-	else:
-		push_warning("mundo.gd: hotbar.tscn não encontrada.")
 
 	if ResourceLoader.exists("res://scenes/ui_mel.tscn"):
 		var ui_mel_cena: PackedScene = load("res://scenes/ui_mel.tscn")
@@ -510,25 +674,34 @@ func _criar_menu_pausa() -> void:
 	_menu_pausa.visible = false
 	add_child(_menu_pausa)
 
+	# Raiz em Control para garantir layout por âncoras relativo à viewport inteira
+	var raiz_ui := Control.new()
+	raiz_ui.name = "RaizMenuPausa"
+	raiz_ui.anchors_preset = Control.PRESET_FULL_RECT
+	raiz_ui.mouse_filter = Control.MOUSE_FILTER_STOP  # Bloqueia input no jogo ao fundo
+	_menu_pausa.add_child(raiz_ui)
+
 	# Fundo semitransparente que escurece o jogo
 	var fundo := ColorRect.new()
 	fundo.name = "Fundo"
 	fundo.color = Color(0.0, 0.0, 0.0, 0.6)
 	fundo.anchors_preset = Control.PRESET_FULL_RECT
 	fundo.mouse_filter = Control.MOUSE_FILTER_STOP  # Bloqueia cliques no jogo
-	_menu_pausa.add_child(fundo)
+	raiz_ui.add_child(fundo)
 
-	# Container central para os botões
+	# Centraliza o menu na tela independentemente da resolução
+	var centro := CenterContainer.new()
+	centro.name = "CentroMenu"
+	centro.anchors_preset = Control.PRESET_FULL_RECT
+	centro.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	raiz_ui.add_child(centro)
+
+	# Container vertical para os botões
 	var container := VBoxContainer.new()
 	container.name = "ContainerMenu"
 	container.alignment = BoxContainer.ALIGNMENT_CENTER
-	container.anchors_preset = Control.PRESET_CENTER
-	container.offset_left = -120.0
-	container.offset_right = 120.0
-	container.offset_top = -80.0
-	container.offset_bottom = 80.0
 	container.add_theme_constant_override("separation", 16)
-	_menu_pausa.add_child(container)
+	centro.add_child(container)
 
 	# Título
 	var titulo := Label.new()
@@ -561,6 +734,7 @@ func _alternar_menu_pausa() -> void:
 		return
 	var abrindo := not _menu_pausa.visible
 	_menu_pausa.visible = abrindo
+	# Pausa/despausa toda a simulação enquanto o menu está aberto
 	get_tree().paused = abrindo
 
 

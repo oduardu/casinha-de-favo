@@ -1,14 +1,14 @@
-[gd_resource type="Resource" script_class="Item" load_steps=3 format=3 uid="uid://mel_resource_001"]
+[gd_resource type="Resource" script_class="Item" load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/item.gd" id="1_item"]
 [ext_resource type="PackedScene" path="res://obj/kenney_ui/honey/honey.glb" id="2_honey"]
 
 [resource]
 script = ExtResource("1_item")
-id = "mel"
-nome_exibicao = "Mel"
+id = "mel_incomum"
+nome_exibicao = "Mel Incomum"
 modelo_3d = ExtResource("2_honey")
 empilhavel = true
 quantidade_maxima = 99
 tipo_interacao = ""
-valor_venda = 10
+valor_venda = 14

@@ -11,7 +11,8 @@
       "Bash(grep -oE '\"name\":\"[^\"]{3,30}\"')",
       "Bash(grep -oE '\"name\":\"[^\"]{2,30}\"')",
       "Bash(python3 -c ' *)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(ls *)"
     ]
   }
 }

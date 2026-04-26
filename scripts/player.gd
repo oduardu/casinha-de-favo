@@ -58,7 +58,6 @@ func _ready() -> void:
 	_nav.target_desired_distance = 0.4
 	_anim = _find_anim_player(_model)
 	_criar_inventario()
-	_criar_ponto_da_mao()
 	_criar_barra_progresso()
 	_criar_particulas()
 
@@ -85,7 +84,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if tile_atual != null:
 			_tentar_interagir()
 		elif colmeia_proxima != null:
-			colmeia_proxima.tentar_coletar(self)
+			colmeia_proxima.tentar_abrir_interface_colmeia(self)
 		elif npc_proximo != null:
 			npc_proximo.tentar_vender(self)
 		elif hex_tile_compravel != null:
@@ -246,13 +245,11 @@ func _ao_sair_npc_area() -> void:
 
 # --- INVENTÁRIO ---
 
-# Cria o nó Inventario como filho do player e conecta o sinal de troca de item
+# Cria o nó Inventario como filho do player
 func _criar_inventario() -> void:
 	inventario = Inventario.new()
 	inventario.name = "Inventario"
 	add_child(inventario)
-	# Escuta quando o item na mão muda para atualizar o modelo 3D
-	inventario.item_na_mao_mudou.connect(_ao_item_na_mao_mudado)
 
 
 # --- ITEM NA MÃO ---
@@ -327,7 +324,10 @@ func _criar_barra_progresso() -> void:
 	var mat_fundo := StandardMaterial3D.new()
 	mat_fundo.albedo_color = Color(0.15, 0.15, 0.15)
 	mat_fundo.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	mat_fundo.no_depth_test = true
+	mat_fundo.render_priority = 0
 	fundo.material_override = mat_fundo
+	fundo.position.z = -0.02
 	_barra_container.add_child(fundo)
 
 	_barra_fill = MeshInstance3D.new()
@@ -337,7 +337,10 @@ func _criar_barra_progresso() -> void:
 	var mat_fill := StandardMaterial3D.new()
 	mat_fill.albedo_color = Color(0.2, 0.85, 0.3)
 	mat_fill.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	mat_fill.no_depth_test = true
+	mat_fill.render_priority = 1
 	_barra_fill.material_override = mat_fill
+	_barra_fill.position.z = 0.02
 	_barra_container.add_child(_barra_fill)
 
 

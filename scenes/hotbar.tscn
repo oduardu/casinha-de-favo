@@ -1,6 +1,8 @@
-[gd_scene format=3 uid="uid://hotbar_ui_scene"]
+[gd_scene format=3 uid="uid://d4duol4yjicnf"]
 
-[ext_resource type="Script" path="res://scripts/hotbar_ui.gd" id="1_hotbarui"]
+[ext_resource type="Script" uid="uid://b6ngssc4q07it" path="res://scripts/hotbar_ui.gd" id="1_hotbarui"]
 
-[node name="HotbarUI" type="Control"]
+[node name="HotbarUI" type="Control" unique_id=1751289011]
+layout_mode = 3
+anchors_preset = 0
 script = ExtResource("1_hotbarui")

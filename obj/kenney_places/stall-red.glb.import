@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://cb5b31l1aspsd"
-path="res://.godot/imported/coin.glb-0a52b008e2e613e26941b9bf8a063d36.scn"
+uid="uid://cptbvdvef1t8b"
+path="res://.godot/imported/stall-red.glb-46db138dcac88de66fb66f959b9cb05d.scn"
 
 [deps]
 
-source_file="res://obj/kenney_ui/coins/coin.glb"
-dest_files=["res://.godot/imported/coin.glb-0a52b008e2e613e26941b9bf8a063d36.scn"]
+source_file="res://obj/kenney_places/stall-red.glb"
+dest_files=["res://.godot/imported/stall-red.glb-46db138dcac88de66fb66f959b9cb05d.scn"]
 
 [params]
 
@@ -17,7 +17,7 @@ nodes/root_type=""
 nodes/root_name=""
 nodes/root_script=null
 nodes/apply_root_scale=true
-nodes/root_scale=0.001
+nodes/root_scale=1.0
 nodes/import_as_skeleton_bones=false
 nodes/use_name_suffixes=true
 nodes/use_node_type_suffixes=true
