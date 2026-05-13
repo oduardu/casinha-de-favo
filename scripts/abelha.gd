@@ -76,6 +76,21 @@ enum EstadoAbelha {
 ## Fator máximo de variação no tempo dentro da colmeia
 @export var fator_aleatorio_dentro_max: float = 1.35
 
+## Caminho do áudio usado como zumbido da abelha
+@export var caminho_audio_zumbido: String = "res://resources/audio/abelha_base.ogg"
+
+## Distância em que o zumbido atinge o volume mais intenso
+@export var distancia_audio_minima: float = 1.2
+
+## Distância máxima em que o zumbido ainda pode ser ouvido
+@export var distancia_audio_maxima: float = 10.0
+
+## Volume (dB) aplicado quando o jogador está no limite máximo de audição (mais baixo)
+@export var volume_audio_longe_db: float = -21.0
+
+## Volume (dB) aplicado quando o jogador está muito perto da abelha (mais baixo)
+@export var volume_audio_perto_db: float = -6.0
+
 
 # --- ESTADO INTERNO ---
 
@@ -130,11 +145,19 @@ var _anim: AnimationPlayer = null
 ## Tween ativo durante as transições ENTRANDO e SAINDO
 var _tween: Tween = null
 
+## Player de áudio 3D usado para o zumbido posicional da abelha
+var _audio_zumbido: AudioStreamPlayer3D = null
+
+## Referência ao jogador para cálculo de distância de áudio
+var _jogador: Node3D = null
+
 
 # --- CICLO DE VIDA ---
 
 func _ready() -> void:
 	_criar_modelo()
+	_configurar_audio_zumbido()
+	_jogador = _buscar_jogador()
 	_rng.randomize()
 	_rng.seed = int(get_instance_id()) * 7919 + int(_rng.randi())
 	_fase_voo = fposmod(float(get_instance_id()) * 0.6180339, TAU)
@@ -190,10 +213,75 @@ func _encontrar_anim_player(node: Node) -> AnimationPlayer:
 	return null
 
 
+## Cria e configura o AudioStreamPlayer3D da abelha, mantendo o volume base baixo.
+func _configurar_audio_zumbido() -> void:
+	if not ResourceLoader.exists(caminho_audio_zumbido):
+		push_warning("abelha.gd: áudio de zumbido não encontrado em %s" % caminho_audio_zumbido)
+		return
+	var stream: AudioStream = load(caminho_audio_zumbido) as AudioStream
+	if stream == null:
+		push_warning("abelha.gd: falha ao carregar áudio de zumbido.")
+		return
+	if stream is AudioStreamOggVorbis:
+		(stream as AudioStreamOggVorbis).loop = true
+	elif stream is AudioStreamWAV:
+		(stream as AudioStreamWAV).loop_mode = AudioStreamWAV.LOOP_FORWARD
+	_audio_zumbido = AudioStreamPlayer3D.new()
+	_audio_zumbido.name = "AudioZumbido"
+	_audio_zumbido.stream = stream
+	# Desativa atenuação automática pela distância da câmera para usar apenas a lógica por proximidade do jogador.
+	_audio_zumbido.attenuation_model = AudioStreamPlayer3D.ATTENUATION_DISABLED
+	_audio_zumbido.max_distance = 200.0
+	_audio_zumbido.unit_size = 1.0
+	_audio_zumbido.bus = "Master"
+	_audio_zumbido.volume_db = volume_audio_longe_db
+	_audio_zumbido.autoplay = false
+	add_child(_audio_zumbido)
+
+
+## Busca o jogador na cena atual para usar como referência de distância do áudio.
+func _buscar_jogador() -> Node3D:
+	var cena_atual: Node = get_tree().current_scene
+	if cena_atual == null:
+		return null
+	var candidato: Node = cena_atual.find_child("Player", true, false)
+	if candidato is Node3D:
+		return candidato as Node3D
+	return null
+
+
+## Atualiza o volume do zumbido por proximidade do jogador e silencia quando longe.
+func _atualizar_audio_proximidade() -> void:
+	if _audio_zumbido == null:
+		return
+	if not visible or estado_atual == EstadoAbelha.DENTRO:
+		if _audio_zumbido.playing:
+			_audio_zumbido.stop()
+		return
+	if _jogador == null or not is_instance_valid(_jogador):
+		_jogador = _buscar_jogador()
+		if _jogador == null:
+			if _audio_zumbido.playing:
+				_audio_zumbido.stop()
+			return
+	var dist: float = global_position.distance_to(_jogador.global_position)
+	var dist_max: float = maxf(distancia_audio_maxima, distancia_audio_minima + 0.001)
+	if dist >= dist_max:
+		if _audio_zumbido.playing:
+			_audio_zumbido.stop()
+		return
+	if not _audio_zumbido.playing:
+		_audio_zumbido.play()
+	var faixa: float = maxf(dist_max - distancia_audio_minima, 0.001)
+	var proximidade: float = clampf(1.0 - ((dist - distancia_audio_minima) / faixa), 0.0, 1.0)
+	_audio_zumbido.volume_db = lerpf(volume_audio_longe_db, volume_audio_perto_db, proximidade)
+
+
 # --- PROCESSAMENTO ---
 
 ## Atualiza a trajetória (VOANDO) ou o timer (DENTRO) a cada frame
 func _process(delta: float) -> void:
+	_atualizar_audio_proximidade()
 	if not _producao_ativa:
 		return
 	match estado_atual:
