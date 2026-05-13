@@ -11,6 +11,12 @@ extends Node3D
 ## Moedas iniciais adicionadas ao GerenciadorMundo na primeira inicialização do jogo
 @export var moedas_debug: int = 10000
 
+## Caminho da trilha sonora ambiente medieval tocada em loop durante o jogo
+@export var caminho_soundtrack: String = "res://resources/audio/soundtrack.mp3"
+
+## Volume base da trilha sonora ambiente em dB
+@export var volume_soundtrack_db: float = -8.5
+
 
 # --- CONSTANTES ---
 
@@ -72,6 +78,39 @@ const TIPO_TILE_COLMEIA_NORMAL: String = "colmeia-normal"
 ## Tipo visual de hexágono usado nos tiles de colmeia rara
 const TIPO_TILE_COLMEIA_RARA: String = "colmeia-rara"
 
+## Texto exibido no painel de licenças do menu ESC.
+const TEXTO_LICENCAS_MENU: String = """RECURSOS E LICENCAS
+
+1) Kenney (modelos 3D e kits visuais)
+- Fontes usadas no projeto:
+  - res://obj/kenney_hexagonal/
+  - res://obj/kenney_nature_kit/
+  - res://obj/kenney_character/
+  - res://obj/kenney_bee/
+  - res://obj/kenney_food_kit/
+- Licenca: Creative Commons Zero (CC0)
+- Termos: uso pessoal, educacional e comercial permitido.
+- Referencia: https://creativecommons.org/publicdomain/zero/1.0/
+- Credito nao obrigatorio, mas recomendado por Kenney.
+- Site: https://www.kenney.nl
+
+2) Trilha sonora ambiente
+- Arquivo: res://resources/audio/soundtrack.mp3
+- Fonte: Free Fantasy Medieval Ambient Music Pack (AlkaKrab)
+- Pagina: https://alkakrab.itch.io/free-fantasy-medieval-ambient-music-pack
+- Uso sujeito aos termos informados pelo autor na pagina do pacote.
+
+3) Zumbido de abelha
+- Arquivo: res://resources/audio/abelha_base.ogg
+- Fonte original: https://www.youtube.com/watch?v=0qv-fq5o1H0
+- Observacao: para distribuicao publica/comercial, confirme direitos de uso do audio original.
+
+4) Engine
+- Godot Engine 4.x
+- Licenca: MIT
+- Site: https://godotengine.org/license
+"""
+
 
 # --- ESTADO ---
 
@@ -96,8 +135,17 @@ var _piso_corpo: StaticBody3D = null
 ## Menu de pausa criado em runtime (CanvasLayer com botões)
 var _menu_pausa: CanvasLayer = null
 
+## Painel principal do menu de pausa (botões de ação)
+var _painel_menu_principal: PanelContainer = null
+
+## Painel de licenças aberto a partir do menu de pausa
+var _painel_menu_licencas: PanelContainer = null
+
 ## RNG para eventos de geração procedural (spawn de colmeia e raridade)
 var _rng_eventos: RandomNumberGenerator = RandomNumberGenerator.new()
+
+## Player de áudio 2D global para trilha sonora de ambiente
+var _audio_soundtrack: AudioStreamPlayer = null
 
 
 # --- CICLO DE VIDA ---
@@ -111,6 +159,7 @@ func _notification(what: int) -> void:
 func _ready() -> void:
 	# Permite que este nó processe input mesmo durante pausa (para ESC fechar o menu)
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	_configurar_soundtrack()
 	_carregar_recursos()
 	GerenciadorMundo.carregar()
 	# Garante que o jogador começa com pelo menos moedas_debug moedas @todo remover
@@ -138,6 +187,9 @@ func _ready() -> void:
 ## Tecla ESC abre/fecha o menu de pausa
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		if _fechar_menu_aberto_por_escape():
+			get_viewport().set_input_as_handled()
+			return
 		_alternar_menu_pausa()
 		get_viewport().set_input_as_handled()
 
@@ -160,6 +212,33 @@ func _carregar_recursos() -> void:
 		_npc_script = load("res://scripts/npc.gd")
 	else:
 		push_warning("mundo.gd: npc.gd não encontrado.")
+
+
+## Configura a trilha sonora ambiente com base em soundtrack.mp3 e inicia reprodução em loop.
+func _configurar_soundtrack() -> void:
+	if not ResourceLoader.exists(caminho_soundtrack):
+		push_warning("mundo.gd: soundtrack não encontrado em %s" % caminho_soundtrack)
+		return
+	var stream: AudioStream = load(caminho_soundtrack) as AudioStream
+	if stream == null:
+		push_warning("mundo.gd: falha ao carregar soundtrack.")
+		return
+	if stream is AudioStreamMP3:
+		(stream as AudioStreamMP3).loop = true
+	elif stream is AudioStreamOggVorbis:
+		(stream as AudioStreamOggVorbis).loop = true
+	elif stream is AudioStreamWAV:
+		(stream as AudioStreamWAV).loop_mode = AudioStreamWAV.LOOP_FORWARD
+	if _audio_soundtrack != null and is_instance_valid(_audio_soundtrack):
+		_audio_soundtrack.queue_free()
+	_audio_soundtrack = AudioStreamPlayer.new()
+	_audio_soundtrack.name = "AudioSoundtrack"
+	_audio_soundtrack.stream = stream
+	_audio_soundtrack.bus = "Master"
+	_audio_soundtrack.volume_db = volume_soundtrack_db
+	_audio_soundtrack.autoplay = false
+	add_child(_audio_soundtrack)
+	_audio_soundtrack.play()
 
 
 # --- UTILITÁRIOS ---
@@ -295,9 +374,7 @@ func _criar_tile(coord: Vector2i, tipo: String, eh_desbloqueado: bool, custo: in
 		var jogador := get_node_or_null("Player")
 		if jogador != null:
 			if jogador.has_method("_ao_entrar_hex_compravel"):
-				tile.jogador_entrou_compravel.connect(
-					func() -> void: jogador._ao_entrar_hex_compravel(tile)
-				)
+				tile.jogador_entrou_compravel.connect(jogador._ao_entrar_hex_compravel)
 			if jogador.has_method("_ao_sair_hex_compravel"):
 				tile.jogador_saiu_compravel.connect(jogador._ao_sair_hex_compravel)
 		tile.comprado.connect(
@@ -690,7 +767,7 @@ func _criar_menu_pausa() -> void:
 	# Raiz em Control para garantir layout por âncoras relativo à viewport inteira
 	var raiz_ui := Control.new()
 	raiz_ui.name = "RaizMenuPausa"
-	raiz_ui.anchors_preset = Control.PRESET_FULL_RECT
+	raiz_ui.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	raiz_ui.mouse_filter = Control.MOUSE_FILTER_STOP  # Bloqueia input no jogo ao fundo
 	_menu_pausa.add_child(raiz_ui)
 
@@ -698,47 +775,145 @@ func _criar_menu_pausa() -> void:
 	var fundo := ColorRect.new()
 	fundo.name = "Fundo"
 	fundo.color = Color(0.0, 0.0, 0.0, 0.6)
-	fundo.anchors_preset = Control.PRESET_FULL_RECT
+	fundo.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	fundo.mouse_filter = Control.MOUSE_FILTER_STOP  # Bloqueia cliques no jogo
 	raiz_ui.add_child(fundo)
 
 	# Centraliza o menu na tela independentemente da resolução
 	var centro := CenterContainer.new()
 	centro.name = "CentroMenu"
-	centro.anchors_preset = Control.PRESET_FULL_RECT
+	centro.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	centro.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	raiz_ui.add_child(centro)
+
+	# Painel central no estilo da UI de referência (madeira clara com borda)
+	var painel := PanelContainer.new()
+	painel.name = "PainelMenuPausa"
+	painel.custom_minimum_size = Vector2(560.0, 420.0)
+	painel.add_theme_stylebox_override("panel", _criar_stylebox_painel_menu_pausa())
+	painel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	painel.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	centro.add_child(painel)
+	_painel_menu_principal = painel
+
+	var centro_painel := CenterContainer.new()
+	centro_painel.name = "CentroConteudoMenu"
+	centro_painel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	centro_painel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	painel.add_child(centro_painel)
 
 	# Container vertical para os botões
 	var container := VBoxContainer.new()
 	container.name = "ContainerMenu"
 	container.alignment = BoxContainer.ALIGNMENT_CENTER
 	container.add_theme_constant_override("separation", 16)
-	centro.add_child(container)
+	container.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	container.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	centro_painel.add_child(container)
 
 	# Título
 	var titulo := Label.new()
 	titulo.text = "PAUSA"
 	titulo.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	titulo.add_theme_font_size_override("font_size", 32)
-	titulo.add_theme_color_override("font_color", Color(1.0, 0.92, 0.5))
+	titulo.add_theme_font_size_override("font_size", 44)
+	titulo.add_theme_color_override("font_color", Color(0.50, 0.34, 0.0))
+	titulo.add_theme_constant_override("outline_size", 2)
+	titulo.add_theme_color_override("font_outline_color", Color(1.0, 0.97, 0.88))
 	container.add_child(titulo)
 
 	# Botão Continuar
 	var btn_continuar := Button.new()
 	btn_continuar.name = "BtnContinuar"
 	btn_continuar.text = "Continuar"
-	btn_continuar.custom_minimum_size = Vector2(240, 48)
+	btn_continuar.custom_minimum_size = Vector2(320, 54)
+	_aplicar_estilo_botao_menu_pausa(btn_continuar, "primario")
 	btn_continuar.pressed.connect(_fechar_menu_pausa)
 	container.add_child(btn_continuar)
 
 	# Botão Reiniciar
 	var btn_reiniciar := Button.new()
 	btn_reiniciar.name = "BtnReiniciar"
-	btn_reiniciar.text = "Reiniciar Jogo"
-	btn_reiniciar.custom_minimum_size = Vector2(240, 48)
+	btn_reiniciar.text = "Reiniciar Mapa"
+	btn_reiniciar.custom_minimum_size = Vector2(320, 54)
+	_aplicar_estilo_botao_menu_pausa(btn_reiniciar, "secundario")
 	btn_reiniciar.pressed.connect(_reiniciar_jogo)
 	container.add_child(btn_reiniciar)
+
+	# Botão Licenças
+	var btn_licencas := Button.new()
+	btn_licencas.name = "BtnLicencas"
+	btn_licencas.text = "Licencas"
+	btn_licencas.custom_minimum_size = Vector2(320, 54)
+	_aplicar_estilo_botao_menu_pausa(btn_licencas, "secundario")
+	btn_licencas.pressed.connect(_abrir_licencas_menu_pausa)
+	container.add_child(btn_licencas)
+
+	# Botão Sair
+	var btn_sair := Button.new()
+	btn_sair.name = "BtnSair"
+	btn_sair.text = "Sair"
+	btn_sair.custom_minimum_size = Vector2(320, 54)
+	_aplicar_estilo_botao_menu_pausa(btn_sair, "perigoso")
+	btn_sair.pressed.connect(_sair_jogo)
+	container.add_child(btn_sair)
+
+	_criar_painel_licencas_menu_pausa(centro)
+
+
+## Cria o painel de licenças do menu ESC no mesmo estilo do painel principal.
+func _criar_painel_licencas_menu_pausa(centro: CenterContainer) -> void:
+	_painel_menu_licencas = PanelContainer.new()
+	_painel_menu_licencas.name = "PainelLicencas"
+	_painel_menu_licencas.custom_minimum_size = Vector2(760.0, 500.0)
+	_painel_menu_licencas.add_theme_stylebox_override("panel", _criar_stylebox_painel_menu_pausa())
+	_painel_menu_licencas.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_painel_menu_licencas.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_painel_menu_licencas.visible = false
+	centro.add_child(_painel_menu_licencas)
+
+	var conteudo := VBoxContainer.new()
+	conteudo.name = "ConteudoLicencas"
+	conteudo.add_theme_constant_override("separation", 16)
+	conteudo.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	conteudo.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_painel_menu_licencas.add_child(conteudo)
+
+	var titulo := Label.new()
+	titulo.text = "LICENCAS"
+	titulo.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	titulo.add_theme_font_size_override("font_size", 40)
+	titulo.add_theme_color_override("font_color", Color(0.50, 0.34, 0.0))
+	titulo.add_theme_constant_override("outline_size", 2)
+	titulo.add_theme_color_override("font_outline_color", Color(1.0, 0.97, 0.88))
+	conteudo.add_child(titulo)
+
+	var scroll := ScrollContainer.new()
+	scroll.name = "ScrollLicencas"
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.custom_minimum_size = Vector2(680.0, 320.0)
+	conteudo.add_child(scroll)
+
+	var texto := RichTextLabel.new()
+	texto.name = "TextoLicencas"
+	texto.bbcode_enabled = false
+	texto.fit_content = false
+	texto.scroll_active = false
+	texto.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	texto.add_theme_font_size_override("normal_font_size", 18)
+	texto.text = TEXTO_LICENCAS_MENU
+	texto.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	texto.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.add_child(texto)
+
+	var btn_voltar := Button.new()
+	btn_voltar.name = "BtnVoltarLicencas"
+	btn_voltar.text = "Voltar"
+	btn_voltar.custom_minimum_size = Vector2(280.0, 52.0)
+	btn_voltar.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_aplicar_estilo_botao_menu_pausa(btn_voltar, "secundario")
+	btn_voltar.pressed.connect(_fechar_licencas_menu_pausa)
+	conteudo.add_child(btn_voltar)
 
 
 ## Alterna a visibilidade do menu de pausa e pausa/despausa o jogo
@@ -747,15 +922,66 @@ func _alternar_menu_pausa() -> void:
 		return
 	var abrindo := not _menu_pausa.visible
 	_menu_pausa.visible = abrindo
+	if abrindo:
+		_fechar_licencas_menu_pausa()
 	# Pausa/despausa toda a simulação enquanto o menu está aberto
 	get_tree().paused = abrindo
+
+
+## Fecha o menu aberto com ESC e retorna true quando algo foi fechado.
+func _fechar_menu_aberto_por_escape() -> bool:
+	if _painel_licencas_esta_aberto():
+		_fechar_licencas_menu_pausa()
+		return true
+	if _menu_pausa != null and _menu_pausa.visible:
+		_fechar_menu_pausa()
+		return true
+
+	for colmeia in get_tree().get_nodes_in_group("colmeia"):
+		if colmeia.has_method("fechar_interface_colmeia_por_atalho"):
+			if bool(colmeia.fechar_interface_colmeia_por_atalho()):
+				return true
+
+	for npc in get_tree().get_nodes_in_group("npc"):
+		if npc.has_method("fechar_interface_venda_por_atalho"):
+			if bool(npc.fechar_interface_venda_por_atalho()):
+				return true
+	return false
 
 
 ## Fecha o menu de pausa e retoma o jogo
 func _fechar_menu_pausa() -> void:
 	if _menu_pausa != null:
 		_menu_pausa.visible = false
+	_fechar_licencas_menu_pausa()
 	get_tree().paused = false
+
+
+## Abre o painel de licenças e oculta o painel principal do menu de pausa.
+func _abrir_licencas_menu_pausa() -> void:
+	if _painel_menu_principal != null:
+		_painel_menu_principal.visible = false
+	if _painel_menu_licencas != null:
+		_painel_menu_licencas.visible = true
+
+
+## Fecha o painel de licenças e retorna ao painel principal do menu de pausa.
+func _fechar_licencas_menu_pausa() -> void:
+	if _painel_menu_licencas != null:
+		_painel_menu_licencas.visible = false
+	if _painel_menu_principal != null:
+		_painel_menu_principal.visible = true
+
+
+## Retorna true quando o painel de licenças do menu ESC está aberto.
+func _painel_licencas_esta_aberto() -> bool:
+	return _painel_menu_licencas != null and _painel_menu_licencas.visible
+
+
+## Encerra o jogo a partir do menu de pausa.
+func _sair_jogo() -> void:
+	get_tree().paused = false
+	get_tree().quit()
 
 
 ## Reseta todo o save e recarrega a cena do zero
@@ -773,3 +999,79 @@ func _reiniciar_jogo() -> void:
 	# Despausa antes de recarregar
 	get_tree().paused = false
 	get_tree().reload_current_scene()
+
+
+## Cria o estilo do painel central de pausa no visual "placa de madeira".
+func _criar_stylebox_painel_menu_pausa() -> StyleBoxFlat:
+	var estilo := StyleBoxFlat.new()
+	estilo.bg_color = Color(0.91, 0.87, 0.79, 0.96)
+	estilo.border_color = Color(0.52, 0.46, 0.38, 1.0)
+	estilo.border_width_top = 4
+	estilo.border_width_right = 4
+	estilo.border_width_bottom = 8
+	estilo.border_width_left = 4
+	estilo.corner_radius_top_left = 18
+	estilo.corner_radius_top_right = 18
+	estilo.corner_radius_bottom_right = 18
+	estilo.corner_radius_bottom_left = 18
+	estilo.shadow_color = Color(0.0, 0.0, 0.0, 0.22)
+	estilo.shadow_size = 4
+	estilo.content_margin_top = 30
+	estilo.content_margin_bottom = 30
+	estilo.content_margin_left = 34
+	estilo.content_margin_right = 34
+	return estilo
+
+
+## Aplica estilos dos botões do menu de pausa baseados no tipo visual.
+func _aplicar_estilo_botao_menu_pausa(botao: Button, tipo: String) -> void:
+	botao.add_theme_font_size_override("font_size", 24)
+	botao.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0))
+	botao.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0))
+	botao.add_theme_color_override("font_pressed_color", Color(1.0, 1.0, 1.0))
+
+	var normal := StyleBoxFlat.new()
+	var hover := StyleBoxFlat.new()
+	var pressed := StyleBoxFlat.new()
+
+	match tipo:
+		"secundario":
+			normal.bg_color = Color(0.97, 0.95, 0.89)
+			normal.border_color = Color(0.50, 0.34, 0.0)
+			hover.bg_color = Color(1.0, 0.98, 0.92)
+			hover.border_color = Color(0.50, 0.34, 0.0)
+			pressed.bg_color = Color(0.92, 0.88, 0.80)
+			pressed.border_color = Color(0.40, 0.28, 0.0)
+			botao.add_theme_color_override("font_color", Color(0.50, 0.34, 0.0))
+			botao.add_theme_color_override("font_hover_color", Color(0.50, 0.34, 0.0))
+			botao.add_theme_color_override("font_pressed_color", Color(0.40, 0.28, 0.0))
+		"perigoso":
+			normal.bg_color = Color(0.73, 0.10, 0.10)
+			normal.border_color = Color(0.58, 0.00, 0.04)
+			hover.bg_color = Color(0.82, 0.16, 0.16)
+			hover.border_color = Color(0.58, 0.00, 0.04)
+			pressed.bg_color = Color(0.60, 0.06, 0.06)
+			pressed.border_color = Color(0.44, 0.00, 0.02)
+		_:
+			normal.bg_color = Color(0.99, 0.70, 0.09)
+			normal.border_color = Color(0.50, 0.34, 0.0)
+			hover.bg_color = Color(1.0, 0.77, 0.18)
+			hover.border_color = Color(0.50, 0.34, 0.0)
+			pressed.bg_color = Color(0.93, 0.63, 0.06)
+			pressed.border_color = Color(0.40, 0.28, 0.0)
+
+	for estilo in [normal, hover, pressed]:
+		estilo.border_width_top = 2
+		estilo.border_width_right = 2
+		estilo.border_width_bottom = 6
+		estilo.border_width_left = 2
+		estilo.corner_radius_top_left = 10
+		estilo.corner_radius_top_right = 10
+		estilo.corner_radius_bottom_right = 10
+		estilo.corner_radius_bottom_left = 10
+		estilo.content_margin_left = 18
+		estilo.content_margin_right = 18
+
+	botao.add_theme_stylebox_override("normal", normal)
+	botao.add_theme_stylebox_override("hover", hover)
+	botao.add_theme_stylebox_override("pressed", pressed)

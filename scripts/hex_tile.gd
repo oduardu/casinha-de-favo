@@ -3,11 +3,13 @@ extends Node3D
 
 # --- SINAIS ---
 
-## Emitido quando um CharacterBody3D entra na Area3D de compra deste tile bloqueado
-signal jogador_entrou_compravel
+## Emitido quando um CharacterBody3D entra na Area3D de compra deste tile bloqueado.
+## Envia a própria referência do tile para permitir controle correto com áreas sobrepostas.
+signal jogador_entrou_compravel(tile: HexTile)
 
-## Emitido quando um CharacterBody3D sai da Area3D de compra deste tile bloqueado
-signal jogador_saiu_compravel
+## Emitido quando um CharacterBody3D sai da Area3D de compra deste tile bloqueado.
+## Envia a própria referência do tile para permitir controle correto com áreas sobrepostas.
+signal jogador_saiu_compravel(tile: HexTile)
 
 ## Emitido quando o tile é comprado com sucesso; 'custo' é o valor pago
 signal comprado(custo: int)
@@ -69,6 +71,18 @@ var desbloqueado: bool = true
 ## Custo em moedas para desbloquear este tile; 0 para tiles inicialmente desbloqueados
 var preco: int = 0
 
+## Duração mínima em segundos para concluir o desbloqueio perto do centro
+@export var tempo_desbloqueio_minimo_segundos: float = 2.5
+
+## Duração máxima em segundos para concluir o desbloqueio nos pontos mais distantes
+@export var tempo_desbloqueio_maximo_segundos: float = 10.0
+
+## True enquanto o tile está em processo de desbloqueio temporizado
+var _desbloqueio_em_andamento: bool = false
+
+## Tempo restante do desbloqueio temporizado, em segundos
+var _tempo_desbloqueio_restante: float = 0.0
+
 
 # --- NÓS FILHOS (criados em _ready) ---
 
@@ -97,6 +111,7 @@ var _label_erro: Label3D = null
 # --- CICLO DE VIDA ---
 
 func _ready() -> void:
+	set_process(false)
 	_carregar_modelo()
 	if desbloqueado and _tipo_bloqueia_passagem(tipo):
 		_criar_colisao_obstaculo()
@@ -105,6 +120,16 @@ func _ready() -> void:
 		_criar_bloqueio()
 		_criar_area_compra()
 		_criar_labels()
+
+
+## Atualiza o timer de desbloqueio enquanto a compra temporizada estiver em andamento.
+func _process(delta: float) -> void:
+	if not _desbloqueio_em_andamento:
+		return
+	_tempo_desbloqueio_restante = maxf(_tempo_desbloqueio_restante - delta, 0.0)
+	_atualizar_label_preco()
+	if _tempo_desbloqueio_restante <= 0.0:
+		_concluir_desbloqueio_temporizado()
 
 
 # --- CARREGAMENTO DO MODELO ---
@@ -186,9 +211,10 @@ func _obter_caminho_modelo(tipo_tile: String) -> String:
 
 ## Retorna true quando o tipo visual representa um obstáculo sólido.
 func _tipo_bloqueia_passagem(tipo_tile: String) -> bool:
-	return tipo_tile == "grass-forest" \
-		or tipo_tile == "dirt-lumber" \
-		or tipo_tile == "stone-rocks"
+	# Como os tiles iniciais agora usam o mesmo chão base (hexagono_chao.glb),
+	# não há mais obstáculo visual dedicado nesses tipos.
+	# Mantemos sem bloqueio físico para evitar colisões invisíveis perto do spawn.
+	return false
 
 
 ## Retorna true quando o tipo visual é um path usado como sobreposição de trilha.
@@ -305,6 +331,9 @@ func desbloquear() -> void:
 func tentar_comprar(jogador: Node) -> void:
 	if desbloqueado:
 		return
+	if _desbloqueio_em_andamento:
+		_mostrar_erro("Desbloqueio em andamento...\nAguarde %.1fs" % _tempo_desbloqueio_restante)
+		return
 
 	if not _tem_vizinho_desbloqueado():
 		_mostrar_erro("Sem acesso!\nDesbloqueie um vizinho primeiro.")
@@ -315,8 +344,7 @@ func tentar_comprar(jogador: Node) -> void:
 		return
 
 	GerenciadorMundo.gastar(preco)
-	GerenciadorMundo.registrar_desbloqueio(coordenada)
-	desbloquear()
+	_iniciar_desbloqueio_temporizado()
 
 
 # --- LÓGICA DE VIZINHANÇA ---
@@ -401,7 +429,8 @@ func _criar_bloqueio() -> void:
 	_corpo_bloqueio.name = "BloqueioFisico"
 
 	var forma := CylinderShape3D.new()
-	forma.radius = 1.3 * TILE_SCALE / 3.0  # Raio proporcional ao tile
+	# Aumenta o raio para cobrir melhor a área útil do hex e evitar atravessar pelos cantos.
+	forma.radius = 1.48 * TILE_SCALE / 3.0
 	forma.height = 2.0                       # Altura suficiente para bloquear o personagem
 
 	var colisao := CollisionShape3D.new()
@@ -419,7 +448,8 @@ func _criar_area_compra() -> void:
 	_area_compra.name = "AreaCompra"
 
 	var forma := CylinderShape3D.new()
-	forma.radius = 1.8 * TILE_SCALE / 3.0  # Raio ligeiramente maior que o bloqueio
+	# Mantém margem confortável para comprar de qualquer direção ao redor do bloqueio.
+	forma.radius = 2.05 * TILE_SCALE / 3.0
 	forma.height = 3.0
 
 	var colisao := CollisionShape3D.new()
@@ -442,13 +472,14 @@ func _criar_labels() -> void:
 	# Label de preço
 	_label_preco = Label3D.new()
 	_label_preco.name = "LabelPreco"
-	_label_preco.text = "💰 %d" % preco
+	_label_preco.text = ""
 	_label_preco.position.y = altura_base
 	_label_preco.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	_label_preco.modulate = Color(1.0, 0.85, 0.0)  # Amarelo
 	_label_preco.font_size = 18
 	_label_preco.visible = false
 	add_child(_label_preco)
+	_atualizar_label_preco()
 
 	# Label de erro (um pouco acima do label de preço)
 	_label_erro = Label3D.new()
@@ -469,8 +500,9 @@ func _criar_labels() -> void:
 func _ao_entrar_area(body: Node) -> void:
 	if body is CharacterBody3D:
 		if is_instance_valid(_label_preco):
+			_atualizar_label_preco()
 			_label_preco.visible = true
-		emit_signal("jogador_entrou_compravel")
+		emit_signal("jogador_entrou_compravel", self)
 
 
 ## Chamado quando um corpo sai da Area3D de compra.
@@ -479,7 +511,7 @@ func _ao_sair_area(body: Node) -> void:
 	if body is CharacterBody3D:
 		if is_instance_valid(_label_preco):
 			_label_preco.visible = false
-		emit_signal("jogador_saiu_compravel")
+		emit_signal("jogador_saiu_compravel", self)
 
 
 # --- FEEDBACK DE ERRO ---
@@ -503,3 +535,56 @@ func _mostrar_erro(msg: String) -> void:
 			_label_erro.visible = false
 			_label_erro.modulate.a = 1.0
 	)
+
+
+## Inicia o processo temporizado de desbloqueio após o pagamento da compra.
+func _iniciar_desbloqueio_temporizado() -> void:
+	_desbloqueio_em_andamento = true
+	_tempo_desbloqueio_restante = _calcular_tempo_desbloqueio_por_distancia()
+	set_process(true)
+	if is_instance_valid(_label_preco):
+		_label_preco.visible = true
+		_atualizar_label_preco()
+
+
+## Conclui o desbloqueio ao final do timer, persiste no save e libera o tile.
+func _concluir_desbloqueio_temporizado() -> void:
+	_desbloqueio_em_andamento = false
+	_tempo_desbloqueio_restante = 0.0
+	set_process(false)
+	GerenciadorMundo.registrar_desbloqueio(coordenada)
+	desbloquear()
+
+
+## Atualiza o texto do label principal exibindo preço normal ou contagem regressiva.
+func _atualizar_label_preco() -> void:
+	if not is_instance_valid(_label_preco):
+		return
+	if _desbloqueio_em_andamento:
+		_label_preco.text = "Desbloqueando...\n%.1fs" % _tempo_desbloqueio_restante
+		return
+	_label_preco.text = "💰 %d" % preco
+
+
+## Calcula o tempo de desbloqueio com base na distância axial até o centro (0,0).
+## Quanto mais longe, maior o tempo, limitado ao máximo configurado (10s por padrão).
+func _calcular_tempo_desbloqueio_por_distancia() -> float:
+	var tempo_min: float = maxf(minf(tempo_desbloqueio_minimo_segundos, tempo_desbloqueio_maximo_segundos), 0.1)
+	var tempo_max_configurado: float = maxf(maxf(tempo_desbloqueio_minimo_segundos, tempo_desbloqueio_maximo_segundos), 0.1)
+	var tempo_max: float = minf(tempo_max_configurado, 10.0)
+	tempo_min = minf(tempo_min, tempo_max)
+	var distancia_centro: int = (abs(coordenada.x) + abs(coordenada.y) + abs(coordenada.x + coordenada.y)) / 2
+	var raio_referencia: int = _obter_raio_referencia_tempo()
+	var fator: float = clampf(float(distancia_centro) / float(maxi(raio_referencia, 1)), 0.0, 1.0)
+	return lerpf(tempo_min, tempo_max, fator)
+
+
+## Retorna o raio de referência do mundo para escalar o tempo por distância.
+## Usa o raio configurado no nó pai quando disponível.
+func _obter_raio_referencia_tempo() -> int:
+	var pai: Node = get_parent()
+	if pai != null:
+		var valor_raio: Variant = pai.get("raio_mundo_externo")
+		if valor_raio != null:
+			return maxi(int(valor_raio), 1)
+	return 8

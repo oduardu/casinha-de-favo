@@ -21,7 +21,8 @@ var _modelo_na_mao_atual: Node3D = null  # Instância do modelo 3D do item atual
 
 
 # --- COMPRA DE HEX ---
-var hex_tile_compravel: Node = null  # Hex tile bloqueado adjacente que pode ser comprado
+var hex_tile_compravel: HexTile = null  # Hex tile bloqueado mais próximo que pode ser comprado no momento
+var _hex_tiles_compraveis_proximos: Array[HexTile] = []  # Lista dos tiles bloqueados cujas áreas de compra estão em contato com o jogador
 
 
 # --- INTERAÇÃO COM COLMEIA ---
@@ -81,12 +82,13 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	# Tecla E (interagir): farm tile → colmeia → NPC → hex comprável (prioridade nessa ordem)
 	if event.is_action_pressed("interagir"):
+		_atualizar_hex_compravel_mais_proximo()
 		if tile_atual != null:
 			_tentar_interagir()
 		elif colmeia_proxima != null:
 			colmeia_proxima.tentar_abrir_interface_colmeia(self)
 		elif npc_proximo != null:
-			npc_proximo.tentar_vender(self)
+			npc_proximo.tentar_abrir_interface_venda(self)
 		elif hex_tile_compravel != null:
 			hex_tile_compravel.tentar_comprar(self)
 
@@ -214,13 +216,43 @@ func _ao_sair_tile() -> void:
 
 
 # Conectado ao sinal jogador_entrou_compravel do HexTile — armazena referência ao tile comprável
-func _ao_entrar_hex_compravel(tile: Node) -> void:
-	hex_tile_compravel = tile
+func _ao_entrar_hex_compravel(tile: HexTile) -> void:
+	if tile == null:
+		return
+	if not _hex_tiles_compraveis_proximos.has(tile):
+		_hex_tiles_compraveis_proximos.append(tile)
+	_atualizar_hex_compravel_mais_proximo()
 
 
 # Conectado ao sinal jogador_saiu_compravel do HexTile — limpa referência
-func _ao_sair_hex_compravel() -> void:
-	hex_tile_compravel = null
+func _ao_sair_hex_compravel(tile: HexTile) -> void:
+	if tile != null:
+		_hex_tiles_compraveis_proximos.erase(tile)
+	_atualizar_hex_compravel_mais_proximo()
+
+
+# Atualiza o tile comprável ativo escolhendo o mais próximo entre as áreas em contato.
+func _atualizar_hex_compravel_mais_proximo() -> void:
+	var lista_filtrada: Array[HexTile] = []
+	for candidato in _hex_tiles_compraveis_proximos:
+		if candidato == null or not is_instance_valid(candidato):
+			continue
+		if candidato.has_method("pode_construir") and candidato.pode_construir():
+			continue
+		lista_filtrada.append(candidato)
+	_hex_tiles_compraveis_proximos = lista_filtrada
+	if _hex_tiles_compraveis_proximos.is_empty():
+		hex_tile_compravel = null
+		return
+	var melhor_tile: HexTile = _hex_tiles_compraveis_proximos[0]
+	var melhor_distancia: float = global_position.distance_squared_to(melhor_tile.global_position)
+	for i in range(1, _hex_tiles_compraveis_proximos.size()):
+		var tile: HexTile = _hex_tiles_compraveis_proximos[i]
+		var distancia: float = global_position.distance_squared_to(tile.global_position)
+		if distancia < melhor_distancia:
+			melhor_distancia = distancia
+			melhor_tile = tile
+	hex_tile_compravel = melhor_tile
 
 
 # Conectado ao sinal jogador_entrou_colmeia via mundo.gd — armazena a colmeia próxima
