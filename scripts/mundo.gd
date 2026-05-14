@@ -66,19 +66,19 @@ const COORDS_CAMINHO_LIVRE: Array[Vector2i] = [
 	Vector2i(2, 2),
 ]
 
-## Chance fixa de spawnar uma colmeia ao comprar um novo hexágono (25%)
-const CHANCE_SPAWN_COLMEIA_EM_COMPRA: float = 0.25
+## Chance fixa de spawnar uma colmeia ao comprar um novo hexágono (20%)
+const CHANCE_SPAWN_COLMEIA_EM_COMPRA: float = 0.20
 
 ## Raridades possíveis para colmeias geradas em compra de terreno
 const RARIDADES_COLMEIA_SORTEIO: Array[String] = ["comum", "rara", "epica", "lendaria"]
 
 ## Distribuição de raridade no centro do mapa (soma 100%).
-## Predomínio de comum conforme solicitado.
-const DISTRIBUICAO_RARIDADE_CENTRO: Array[float] = [70.0, 18.0, 8.0, 4.0]
+## Comum é mais frequente perto do início; lendária é raridade máxima.
+const DISTRIBUICAO_RARIDADE_CENTRO: Array[float] = [60.0, 25.0, 12.0, 3.0]
 
 ## Distribuição de raridade no limite do mapa (soma 100%).
-## Comum reduz, demais raridades aumentam ao se afastar.
-const DISTRIBUICAO_RARIDADE_BORDA: Array[float] = [40.0, 30.0, 20.0, 10.0]
+## Comum reduz ao se afastar; épica e lendária ficam mais frequentes nas bordas.
+const DISTRIBUICAO_RARIDADE_BORDA: Array[float] = [30.0, 30.0, 28.0, 12.0]
 
 ## Tipo visual de hexágono usado nos tiles que possuem colmeia
 const TIPO_TILE_COLMEIA_NORMAL: String = "colmeia-normal"
