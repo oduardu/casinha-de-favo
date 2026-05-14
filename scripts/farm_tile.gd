@@ -140,8 +140,8 @@ func _criar_area_deteccao() -> void:
 func _criar_hint_label() -> void:
 	_hint_label = Label3D.new()
 	_hint_label.name = "HintLabel"
-	_hint_label.text = "Pressione E para plantar"
-	_hint_label.font_size = 24
+	_hint_label.text = "(E) Plantar"
+	_hint_label.font_size = 42
 	_hint_label.modulate = Color(1.0, 0.95, 0.4)
 	_hint_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	_hint_label.position.y = 1.2
@@ -153,7 +153,7 @@ func _criar_hint_label() -> void:
 func _criar_label_erro() -> void:
 	_label_erro = Label3D.new()
 	_label_erro.name = "LabelErro"
-	_label_erro.font_size = 22
+	_label_erro.font_size = 38
 	_label_erro.modulate = Color(1.0, 0.35, 0.35)  # Vermelho suave
 	_label_erro.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	_label_erro.position.y = 1.0
@@ -197,7 +197,7 @@ func _mostrar_erro(mensagem: String) -> void:
 
 # --- GERAÇÃO DE FLORES ---
 
-# Gera flores low-poly (CSGCylinder + CSGSphere) com tween de aparecimento em cascata
+# Gera flores low-poly (MeshInstance3D com CylinderMesh + SphereMesh) com tween de aparecimento
 func _gerar_flores() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.randomize()
@@ -210,33 +210,44 @@ func _gerar_flores() -> void:
 		Color(1.0, 1.0, 1.0),
 	]
 
+	# Meshes reutilizados para todas as flores (muito mais leve que CSG)
+	var mesh_caule := CylinderMesh.new()
+	mesh_caule.top_radius = 0.045
+	mesh_caule.bottom_radius = 0.045
+	mesh_caule.height = 0.45
+
+	var mesh_flor := SphereMesh.new()
+	mesh_flor.radius = 0.14
+	mesh_flor.height = 0.28
+
+	var mat_caule := StandardMaterial3D.new()
+	mat_caule.albedo_color = Color(0.2, 0.7, 0.2)
+
 	for i in QUANTIDADE_FLORES:
 		var angulo := rng.randf_range(0.0, TAU)
 		var distancia := rng.randf_range(0.2, RAIO_FLORES)
 		var pos_xz := Vector3(cos(angulo) * distancia, 0.0, sin(angulo) * distancia)
 
-		var caule := CSGCylinder3D.new()
-		caule.radius = 0.045
-		caule.height = 0.45
-		caule.position = pos_xz + Vector3(0.0, 0.225, 0.0)
-		caule.scale = Vector3.ZERO  # Começa invisível para o tween
+		var raiz_flor := Node3D.new()
+		raiz_flor.position = pos_xz
+		raiz_flor.scale = Vector3.ZERO
+		_flores_container.add_child(raiz_flor)
 
-		var mat_caule := StandardMaterial3D.new()
-		mat_caule.albedo_color = Color(0.2, 0.7, 0.2)
-		caule.material_override = mat_caule
-		_flores_container.add_child(caule)
+		var mi_caule := MeshInstance3D.new()
+		mi_caule.mesh = mesh_caule
+		mi_caule.material_override = mat_caule
+		mi_caule.position.y = 0.225
+		raiz_flor.add_child(mi_caule)
 
-		var flor := CSGSphere3D.new()
-		flor.radius = 0.14
-		flor.position = Vector3(0.0, 0.32, 0.0)
-
+		var mi_flor := MeshInstance3D.new()
+		mi_flor.mesh = mesh_flor
 		var mat_flor := StandardMaterial3D.new()
 		mat_flor.albedo_color = cores[rng.randi() % cores.size()]
-		flor.material_override = mat_flor
-		caule.add_child(flor)
+		mi_flor.material_override = mat_flor
+		mi_flor.position.y = 0.45
+		raiz_flor.add_child(mi_flor)
 
-		# Aparecimento em cascata: cada flor com atraso de 0.18s
 		var tween := create_tween()
 		tween.tween_interval(i * 0.18)
-		tween.tween_property(caule, "scale", Vector3.ONE, 0.45) \
+		tween.tween_property(raiz_flor, "scale", Vector3.ONE, 0.45) \
 			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)

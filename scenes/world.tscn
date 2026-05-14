@@ -25,12 +25,14 @@ environment = SubResource("2")
 navigation_mesh = SubResource("NavMesh")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1869886775]
-transform = Transform3D(-0.44225743, 0.63419574, 0.63419574, 0, 0.7071068, -0.7071068, -0.89688814, -0.31272325, -0.31272325, 14.228622, 22.514278, 13.981651)
-light_color = Color(0.94152987, 1, 0.7493974, 1)
+transform = Transform3D(0.9146294, -0.27199373, -0.29911965, 0.39520437, 0.44549733, 0.8033341, -0.085244805, -0.85296637, 0.514958, 41.316063, 6.786669, 63.540787)
+visible = false
+light_color = Color(0.9411765, 0.9843137, 0.41960785, 1)
 light_energy = 1.5
 shadow_enabled = true
 shadow_bias = 0.02
 directional_shadow_max_distance = 80.0
+sky_mode = 1
 
 [node name="Camera3D" type="Camera3D" parent="." unique_id=386023982]
 transform = Transform3D(0.78970814, -0.1980107, 0.58064854, 0.026417343, 0.95657706, 0.29027975, -0.6129137, -0.21389712, 0.76064765, 4.5, 5.5, 7)

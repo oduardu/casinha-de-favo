@@ -254,6 +254,11 @@ func _buscar_jogador() -> Node3D:
 func _atualizar_audio_proximidade() -> void:
 	if _audio_zumbido == null:
 		return
+	# Respeita a configuração global de som das abelhas
+	if not GerenciadorMundo.som_abelhas_ativo:
+		if _audio_zumbido.playing:
+			_audio_zumbido.stop()
+		return
 	if not visible or estado_atual == EstadoAbelha.DENTRO:
 		if _audio_zumbido.playing:
 			_audio_zumbido.stop()
@@ -279,9 +284,16 @@ func _atualizar_audio_proximidade() -> void:
 
 # --- PROCESSAMENTO ---
 
+## Timer para atualizar áudio de proximidade a cada 0.25s em vez de todo frame
+var _timer_audio: float = 0.0
+
+
 ## Atualiza a trajetória (VOANDO) ou o timer (DENTRO) a cada frame
 func _process(delta: float) -> void:
-	_atualizar_audio_proximidade()
+	_timer_audio += delta
+	if _timer_audio >= 0.25:
+		_timer_audio = 0.0
+		_atualizar_audio_proximidade()
 	if not _producao_ativa:
 		return
 	match estado_atual:
@@ -321,7 +333,6 @@ func _atualizar_voando(delta: float) -> void:
 	if tangente.length_squared() > 0.000001:
 		var dir_frame: Vector3 = tangente.normalized()
 		_direcao_voo_atual = _direcao_voo_atual.slerp(dir_frame, minf(delta * 9.0, 1.0))
-		var alvo: Vector3 = global_position + _direcao_voo_atual
 		var base_alvo: Basis = Basis.looking_at(_direcao_voo_atual, Vector3.UP)
 		basis = basis.slerp(base_alvo, minf(delta * 10.0, 1.0))
 		_atualizar_postura_organica(tangente, delta)

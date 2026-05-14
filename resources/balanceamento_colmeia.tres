@@ -1,0 +1,40 @@
+[gd_resource type="Resource" script_class="BalanceamentoColmeia" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/balanceamento_colmeia.gd" id="1_balanceamento"]
+
+[resource]
+script = ExtResource("1_balanceamento")
+incremento_por_abelha = 0.33
+tempo_voando_base = 8.0
+tempo_dentro_colmeia_base = 5.0
+custo_primeira_abelha = 30
+incremento_custo_por_abelha = 20
+custo_upgrade_por_nivel = [0, 120, 260, 420, 650]
+capacidade_abelhas_por_nivel = [2, 5, 7, 10, 15]
+tempo_cooldown_upgrade = 300.0
+capacidade_estoque_mel_por_nivel = [5, 15, 35, 75, 150]
+custo_upgrade_estoque_mel_por_nivel = [0, 70, 170, 360, 720]
+multiplicador_raridade = {
+"comum": 1.0,
+"rara": 1.45,
+"epica": 1.8,
+"lendaria": 2.3
+}
+multiplicador_tempo_upgrade_raridade = {
+"comum": 1.0,
+"rara": 1.45,
+"epica": 1.8,
+"lendaria": 2.3
+}
+recurso_mel_por_raridade = {
+"comum": "res://resources/mel.tres",
+"rara": "res://resources/mel_raro.tres",
+"epica": "res://resources/mel_epico.tres",
+"lendaria": "res://resources/mel_lendario.tres"
+}
+valor_venda_por_raridade = {
+"comum": 10,
+"rara": 20,
+"epica": 30,
+"lendaria": 45
+}

@@ -53,6 +53,12 @@ const CAMINHO_COLMEIA_HEX_NORMAL := "res://obj/colmeias/hexagonal_colmeia_normal
 ## Caminho do modelo GLB do hexágono de colmeia rara
 const CAMINHO_COLMEIA_HEX_RARA := "res://obj/colmeias/hexagonal_colmeia_rara.glb"
 
+## Caminho do modelo GLB do hexágono de colmeia épica (fallback estável)
+const CAMINHO_COLMEIA_HEX_EPICA := "res://obj/colmeias/hexagonal_colmeia_rara.glb"
+
+## Caminho do modelo GLB do hexágono de colmeia lendária (fallback estável)
+const CAMINHO_COLMEIA_HEX_LENDARIA := "res://obj/colmeias/hexagonal_colmeia_normal.glb"
+
 ## Caminho do modelo GLB padrão de chão (tema chaos)
 const CAMINHO_CHAO_CHAOS := "res://obj/chaos/hexagono_chao.glb"
 
@@ -72,10 +78,10 @@ var desbloqueado: bool = true
 var preco: int = 0
 
 ## Duração mínima em segundos para concluir o desbloqueio perto do centro
-@export var tempo_desbloqueio_minimo_segundos: float = 2.5
+@export var tempo_desbloqueio_minimo_segundos: float = 3.0
 
 ## Duração máxima em segundos para concluir o desbloqueio nos pontos mais distantes
-@export var tempo_desbloqueio_maximo_segundos: float = 10.0
+@export var tempo_desbloqueio_maximo_segundos: float = 7.0
 
 ## True enquanto o tile está em processo de desbloqueio temporizado
 var _desbloqueio_em_andamento: bool = false
@@ -204,13 +210,17 @@ func _obter_caminho_modelo(tipo_tile: String) -> String:
 			return CAMINHO_COLMEIA_HEX_NORMAL
 		"colmeia-rara":
 			return CAMINHO_COLMEIA_HEX_RARA
+		"colmeia-epica":
+			return CAMINHO_COLMEIA_HEX_EPICA
+		"colmeia-lendaria":
+			return CAMINHO_COLMEIA_HEX_LENDARIA
 		_:
 			push_warning("HexTile: tipo desconhecido '%s', usando grass." % tipo_tile)
 			return CAMINHO_CHAO_CHAOS
 
 
 ## Retorna true quando o tipo visual representa um obstáculo sólido.
-func _tipo_bloqueia_passagem(tipo_tile: String) -> bool:
+func _tipo_bloqueia_passagem(_tipo_tile: String) -> bool:
 	# Como os tiles iniciais agora usam o mesmo chão base (hexagono_chao.glb),
 	# não há mais obstáculo visual dedicado nesses tipos.
 	# Mantemos sem bloqueio físico para evitar colisões invisíveis perto do spawn.
@@ -227,7 +237,9 @@ func _tipo_eh_caminho(tipo_tile: String) -> bool:
 ## Retorna true quando o tipo visual representa um hexágono de colmeia.
 func _tipo_eh_colmeia(tipo_tile: String) -> bool:
 	return tipo_tile == "colmeia-normal" \
-		or tipo_tile == "colmeia-rara"
+		or tipo_tile == "colmeia-rara" \
+		or tipo_tile == "colmeia-epica" \
+		or tipo_tile == "colmeia-lendaria"
 
 
 # --- API PÚBLICA ---
@@ -328,7 +340,7 @@ func desbloquear() -> void:
 
 ## Tenta comprar este tile: valida vizinhança, saldo e executa a compra.
 ## Mostra mensagem de erro em _label_erro se a condição não for satisfeita.
-func tentar_comprar(jogador: Node) -> void:
+func tentar_comprar(_jogador: Node) -> void:
 	if desbloqueado:
 		return
 	if _desbloqueio_em_andamento:
@@ -476,7 +488,7 @@ func _criar_labels() -> void:
 	_label_preco.position.y = altura_base
 	_label_preco.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	_label_preco.modulate = Color(1.0, 0.85, 0.0)  # Amarelo
-	_label_preco.font_size = 18
+	_label_preco.font_size = 36
 	_label_preco.visible = false
 	add_child(_label_preco)
 	_atualizar_label_preco()
@@ -488,7 +500,7 @@ func _criar_labels() -> void:
 	_label_erro.position.y = altura_base + 0.4
 	_label_erro.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	_label_erro.modulate = Color(1.0, 0.2, 0.2)  # Vermelho
-	_label_erro.font_size = 16
+	_label_erro.font_size = 32
 	_label_erro.visible = false
 	add_child(_label_erro)
 
@@ -563,7 +575,7 @@ func _atualizar_label_preco() -> void:
 	if _desbloqueio_em_andamento:
 		_label_preco.text = "Desbloqueando...\n%.1fs" % _tempo_desbloqueio_restante
 		return
-	_label_preco.text = "💰 %d" % preco
+	_label_preco.text = "(E) 💰 %d" % preco
 
 
 ## Calcula o tempo de desbloqueio com base na distância axial até o centro (0,0).
@@ -571,7 +583,7 @@ func _atualizar_label_preco() -> void:
 func _calcular_tempo_desbloqueio_por_distancia() -> float:
 	var tempo_min: float = maxf(minf(tempo_desbloqueio_minimo_segundos, tempo_desbloqueio_maximo_segundos), 0.1)
 	var tempo_max_configurado: float = maxf(maxf(tempo_desbloqueio_minimo_segundos, tempo_desbloqueio_maximo_segundos), 0.1)
-	var tempo_max: float = minf(tempo_max_configurado, 10.0)
+	var tempo_max: float = tempo_max_configurado
 	tempo_min = minf(tempo_min, tempo_max)
 	var distancia_centro: int = (abs(coordenada.x) + abs(coordenada.y) + abs(coordenada.x + coordenada.y)) / 2
 	var raio_referencia: int = _obter_raio_referencia_tempo()

@@ -20,6 +20,8 @@ func _ready() -> void:
 	_cur_elevation = ELEV_CLOSE_DEG
 
 func _unhandled_input(event: InputEvent) -> void:
+	if get_tree().paused:
+		return
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_target_size = clampf(_target_size - zoom_speed, zoom_min, zoom_max)

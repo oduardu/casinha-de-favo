@@ -1,37 +1,57 @@
 extends Control
 
-# HUD com ícones 3D (coin.glb, honey.glb, number-X.glb) renderizados via SubViewport.
+# HUD com ícones 3D (coin.glb, honey.glb) e texto legível via fonte Fredoka Bold.
 # Exibe moedas e mel do jogador no canto superior direito.
 
 
-# --- CAMINHOS DOS MODELOS ---
 
-const CAMINHO_COIN := "res://obj/kenney_ui/coins/coin.glb"
-const CAMINHO_HONEY := "res://obj/kenney_ui/honey/honey.glb"
-const PREFIXO_NUMEROS := "res://obj/kenney_ui/numbers/number-"
+## Caminho da fonte customizada para números da HUD
+const CAMINHO_FONTE := "res://resources/fonts/Fredoka-Bold.ttf"
 
 
 # --- CONFIGURAÇÃO ---
 
-## Tamanho em pixels de cada SubViewport de ícone
-const TAMANHO_ICONE := Vector2i(64, 64)
 
-## Tamanho em pixels de cada SubViewport de dígito
-const TAMANHO_DIGITO := Vector2i(36, 48)
-
-## Quantidade máxima de dígitos por contador
-const MAX_DIGITOS := 4
+## Tamanho da fonte dos números de recursos na HUD
+const TAMANHO_FONTE_VALOR := 32
 
 
 # --- REFERÊNCIAS ---
 
 var _inventario: Node = null
+
+## Painel principal da HUD com resumo de recursos
+var _painel_resumo: PanelContainer = null
+
 var _container: VBoxContainer = null
-var _digitos_moedas: Array[SubViewportContainer] = []
-var _digitos_mel: Array[SubViewportContainer] = []
-var _cenas_digitos: Array[PackedScene] = []
+
+## Label de texto que exibe o valor de moedas
+var _label_moedas: Label = null
+
+## Label de texto que exibe o valor de mel total
+var _label_mel: Label = null
+
+## Fonte customizada carregada em runtime para melhor legibilidade
+var _fonte: Font = null
+
 var _moedas_cache: int = -1
 var _mel_cache: int = -1
+var _dia_cache: int = -1
+var _periodo_cache: bool = true
+## Cache do minuto do dia para atualizar horário da HUD só quando necessário
+var _minuto_dia_cache: int = -1
+
+## Label textual com dia atual, período (dia/noite) e horário do ciclo
+var _label_dia_periodo: Label = null
+
+## Painel lateral com a lista dos tipos de mel em posse do jogador
+var _painel_tipos_mel: PanelContainer = null
+
+## Lista vertical dinâmica com as linhas de cada tipo de mel
+var _lista_tipos_mel: VBoxContainer = null
+
+## Cache do tamanho da tela para reposicionar a HUD apenas quando necessário
+var _tamanho_tela_cache: Vector2 = Vector2.ZERO
 
 
 # --- CICLO DE VIDA ---
@@ -39,188 +59,174 @@ var _mel_cache: int = -1
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_inventario = get_tree().get_first_node_in_group("inventario")
-	_pre_carregar_digitos()
+	_carregar_fonte()
 	_criar_ui()
 	_conectar_sinais()
 	_atualizar_tudo()
 	set_process(true)
 
 
-func _process(_delta: float) -> void:
+## Timer interno para atualizar informações periódicas (dia/noite) sem polling todo frame
+var _timer_atualizacao: float = 0.0
+
+## Intervalo em segundos entre atualizações periódicas da HUD (moedas, dia/noite)
+const INTERVALO_ATUALIZACAO: float = 0.5
+
+
+func _process(delta: float) -> void:
+	var tamanho_tela_atual: Vector2 = get_viewport().get_visible_rect().size
+	if tamanho_tela_atual != _tamanho_tela_cache:
+		_tamanho_tela_cache = tamanho_tela_atual
+		_reposicionar_hud()
+
+	_timer_atualizacao += delta
+	if _timer_atualizacao < INTERVALO_ATUALIZACAO:
+		return
+	_timer_atualizacao = 0.0
+
 	var moedas_atual := GerenciadorMundo.moedas
 	if moedas_atual != _moedas_cache:
 		_moedas_cache = moedas_atual
-		_atualizar_digitos(_digitos_moedas, moedas_atual)
+		_atualizar_label_valor(_label_moedas, moedas_atual)
 
-	var mel_atual := _contar_mel_inventario()
-	if mel_atual != _mel_cache:
-		_mel_cache = mel_atual
-		_atualizar_digitos(_digitos_mel, mel_atual)
+	var dia_atual := GerenciadorMundo.dia_atual
+	var periodo_atual := GerenciadorMundo.periodo_eh_dia
+	var minuto_atual: int = _obter_minuto_do_dia_atual()
+	if dia_atual != _dia_cache or periodo_atual != _periodo_cache or minuto_atual != _minuto_dia_cache:
+		_dia_cache = dia_atual
+		_periodo_cache = periodo_atual
+		_minuto_dia_cache = minuto_atual
+		_atualizar_label_dia_periodo()
 
 
 # --- PRÉ-CARREGAMENTO ---
 
-func _pre_carregar_digitos() -> void:
-	for i in 10:
-		var caminho := PREFIXO_NUMEROS + str(i) + ".glb"
-		if ResourceLoader.exists(caminho):
-			_cenas_digitos.append(load(caminho))
-		else:
-			_cenas_digitos.append(null)
+## Carrega a fonte customizada Fredoka Bold para uso na HUD.
+func _carregar_fonte() -> void:
+	if ResourceLoader.exists(CAMINHO_FONTE):
+		_fonte = load(CAMINHO_FONTE) as Font
 
 
 # --- CRIAÇÃO VISUAL ---
 
 func _criar_ui() -> void:
+	_painel_resumo = PanelContainer.new()
+	_painel_resumo.name = "PainelResumoHUD"
+	_painel_resumo.custom_minimum_size = Vector2(300.0, 0.0)
+	_painel_resumo.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_painel_resumo.add_theme_stylebox_override("panel", _criar_stylebox_painel_resumo())
+	add_child(_painel_resumo)
+
 	_container = VBoxContainer.new()
 	_container.name = "ContainerHUD"
-	_container.add_theme_constant_override("separation", 4)
-	var tela := get_viewport().get_visible_rect().size
-	_container.position = Vector2(tela.x - 250.0, 12.0)
-	add_child(_container)
+	_container.add_theme_constant_override("separation", 10)
+	_painel_resumo.add_child(_container)
+
+	var titulo := Label.new()
+	titulo.text = "RECURSOS"
+	titulo.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	titulo.add_theme_font_size_override("font_size", 22)
+	titulo.add_theme_color_override("font_color", Color(0.47, 0.33, 0.05))
+
+	_container.add_child(titulo)
 
 	# Linha de moedas
+	var card_moedas := PanelContainer.new()
+	card_moedas.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card_moedas.add_theme_stylebox_override("panel", _criar_stylebox_card_recurso())
+	_container.add_child(card_moedas)
+
 	var linha_moedas := HBoxContainer.new()
 	linha_moedas.name = "LinhaCoins"
-	linha_moedas.add_theme_constant_override("separation", 2)
+	linha_moedas.add_theme_constant_override("separation", 10)
+	linha_moedas.alignment = BoxContainer.ALIGNMENT_CENTER
 	linha_moedas.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_container.add_child(linha_moedas)
-	linha_moedas.add_child(_criar_icone_3d(CAMINHO_COIN, TAMANHO_ICONE))
-	_digitos_moedas = _criar_grupo_digitos(linha_moedas)
+	card_moedas.add_child(linha_moedas)
+
+	linha_moedas.add_child(_criar_icone_label("💰", 40))
+
+	var placa_moedas: PanelContainer
+	placa_moedas = _criar_placa_valor()
+	_label_moedas = placa_moedas.get_child(0) as Label
+	linha_moedas.add_child(placa_moedas)
 
 	# Linha de mel
+	var card_mel := PanelContainer.new()
+	card_mel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card_mel.add_theme_stylebox_override("panel", _criar_stylebox_card_recurso())
+	_container.add_child(card_mel)
+
 	var linha_mel := HBoxContainer.new()
 	linha_mel.name = "LinhaHoney"
-	linha_mel.add_theme_constant_override("separation", 2)
+	linha_mel.add_theme_constant_override("separation", 10)
+	linha_mel.alignment = BoxContainer.ALIGNMENT_CENTER
 	linha_mel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_container.add_child(linha_mel)
-	linha_mel.add_child(_criar_icone_3d(CAMINHO_HONEY, TAMANHO_ICONE))
-	_digitos_mel = _criar_grupo_digitos(linha_mel)
+	card_mel.add_child(linha_mel)
+
+	linha_mel.add_child(_criar_icone_label("🍯", 40))
+
+	var placa_mel: PanelContainer
+	placa_mel = _criar_placa_valor()
+	_label_mel = placa_mel.get_child(0) as Label
+	linha_mel.add_child(placa_mel)
+
+	# Linha de dia/noite
+	var card_dia := PanelContainer.new()
+	card_dia.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card_dia.add_theme_stylebox_override("panel", _criar_stylebox_card_recurso())
+	_container.add_child(card_dia)
+
+	_label_dia_periodo = Label.new()
+	_label_dia_periodo.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_label_dia_periodo.add_theme_font_size_override("font_size", 16)
+	_label_dia_periodo.add_theme_color_override("font_color", Color(0.40, 0.28, 0.0))
+
+	card_dia.add_child(_label_dia_periodo)
+	_atualizar_label_dia_periodo()
+
+	_criar_painel_tipos_mel()
+	_tamanho_tela_cache = get_viewport().get_visible_rect().size
+	_reposicionar_hud()
 
 
-## Cria um SubViewportContainer que renderiza um modelo 3D como ícone.
-## Usa apenas DirectionalLight3D — sem WorldEnvironment para não afetar a cena principal.
-func _criar_icone_3d(caminho: String, tamanho: Vector2i) -> SubViewportContainer:
-	var svc := SubViewportContainer.new()
-	svc.stretch = true
-	svc.custom_minimum_size = Vector2(tamanho)
-	svc.mouse_filter = Control.MOUSE_FILTER_IGNORE
-
-	var sv := SubViewport.new()
-	sv.size = tamanho
-	sv.transparent_bg = true
-	sv.render_target_update_mode = SubViewport.UPDATE_ONCE
-	sv.own_world_3d = true  # Isola a renderização — não compartilha com a cena principal
-	svc.add_child(sv)
-
-	var cam := Camera3D.new()
-	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
-	cam.size = 1.6
-	cam.position = Vector3(0.0, 0.6, 2.0)
-	cam.rotation_degrees = Vector3(-15.0, 0.0, 0.0)
-	cam.far = 10.0
-	sv.add_child(cam)
-
-	# Duas luzes direcionais para iluminação limpa sem WorldEnvironment
-	var luz1 := DirectionalLight3D.new()
-	luz1.rotation_degrees = Vector3(-40.0, 30.0, 0.0)
-	luz1.light_energy = 2.0
-	sv.add_child(luz1)
-
-	var luz2 := DirectionalLight3D.new()
-	luz2.rotation_degrees = Vector3(-20.0, -60.0, 0.0)
-	luz2.light_energy = 0.8
-	sv.add_child(luz2)
-
-	if ResourceLoader.exists(caminho):
-		var cena: PackedScene = load(caminho)
-		if cena != null:
-			var modelo: Node3D = cena.instantiate() as Node3D
-			modelo.name = "Modelo"
-			if caminho == CAMINHO_COIN:
-				modelo.rotation_degrees.y = 90.0
-			sv.add_child(modelo)
-
-	return svc
+## Cria um label emoji como ícone de recurso na HUD.
+func _criar_icone_label(emoji: String, tamanho: int) -> Label:
+	var lbl := Label.new()
+	lbl.text = emoji
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.custom_minimum_size = Vector2(tamanho, tamanho)
+	lbl.add_theme_font_size_override("font_size", tamanho - 8)
+	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return lbl
 
 
-func _criar_grupo_digitos(pai: HBoxContainer) -> Array[SubViewportContainer]:
-	var grupo: Array[SubViewportContainer] = []
-	for i in MAX_DIGITOS:
-		var svc := _criar_digito_viewport()
-		svc.visible = false
-		pai.add_child(svc)
-		grupo.append(svc)
-	return grupo
+## Cria uma placa (PanelContainer) com Label interno para exibir valores numéricos na HUD.
+## O Label é o primeiro filho do PanelContainer retornado.
+func _criar_placa_valor() -> PanelContainer:
+	var placa_valor := PanelContainer.new()
+	placa_valor.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	placa_valor.custom_minimum_size = Vector2(120.0, 50.0)
+	placa_valor.add_theme_stylebox_override("panel", _criar_stylebox_placa_valor())
+
+	var lbl := Label.new()
+	lbl.text = "0"
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lbl.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	lbl.add_theme_font_size_override("font_size", TAMANHO_FONTE_VALOR)
+	lbl.add_theme_color_override("font_color", Color(1.0, 0.95, 0.7))
+	placa_valor.add_child(lbl)
+
+	return placa_valor
 
 
-func _criar_digito_viewport() -> SubViewportContainer:
-	var svc := SubViewportContainer.new()
-	svc.stretch = true
-	svc.custom_minimum_size = Vector2(TAMANHO_DIGITO)
-	svc.mouse_filter = Control.MOUSE_FILTER_IGNORE
-
-	var sv := SubViewport.new()
-	sv.name = "SV"
-	sv.size = TAMANHO_DIGITO
-	sv.transparent_bg = true
-	sv.render_target_update_mode = SubViewport.UPDATE_ONCE
-	sv.own_world_3d = true  # Isola a renderização
-	svc.add_child(sv)
-
-	var cam := Camera3D.new()
-	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
-	cam.size = 1.2
-	cam.position = Vector3(0.0, 0.5, 2.0)
-	cam.rotation_degrees = Vector3(-10.0, 0.0, 0.0)
-	cam.far = 10.0
-	sv.add_child(cam)
-
-	var luz1 := DirectionalLight3D.new()
-	luz1.rotation_degrees = Vector3(-40.0, 30.0, 0.0)
-	luz1.light_energy = 2.0
-	sv.add_child(luz1)
-
-	var luz2 := DirectionalLight3D.new()
-	luz2.rotation_degrees = Vector3(-20.0, -60.0, 0.0)
-	luz2.light_energy = 0.8
-	sv.add_child(luz2)
-
-	return svc
-
-
-# --- ATUALIZAÇÃO DOS DÍGITOS ---
-
-func _atualizar_digitos(grupo: Array[SubViewportContainer], valor: int) -> void:
-	var texto := str(maxi(valor, 0))
-	var offset := MAX_DIGITOS - texto.length()
-
-	for i in MAX_DIGITOS:
-		var svc := grupo[i]
-		var sv: SubViewport = svc.get_node("SV")
-		var pos_texto := i - offset
-
-		if pos_texto < 0 or pos_texto >= texto.length():
-			svc.visible = false
-			continue
-
-		svc.visible = true
-		var digito := int(texto[pos_texto])
-
-		var modelo_antigo := sv.get_node_or_null("Digito")
-		if modelo_antigo != null:
-			if modelo_antigo.has_meta("valor") and modelo_antigo.get_meta("valor") == digito:
-				continue
-			modelo_antigo.queue_free()
-
-		if digito >= 0 and digito < _cenas_digitos.size() and _cenas_digitos[digito] != null:
-			var novo: Node3D = _cenas_digitos[digito].instantiate() as Node3D
-			novo.name = "Digito"
-			novo.rotation_degrees.y = 90.0
-			novo.set_meta("valor", digito)
-			sv.add_child(novo)
-			# Força re-render do SubViewport após trocar o modelo
-			sv.render_target_update_mode = SubViewport.UPDATE_ONCE
+## Atualiza o texto numérico de um label de valor da HUD.
+func _atualizar_label_valor(lbl: Label, valor: int) -> void:
+	if lbl == null:
+		return
+	lbl.text = str(maxi(valor, 0))
 
 
 # --- SINAIS ---
@@ -238,12 +244,243 @@ func _conectar_sinais() -> void:
 
 func _atualizar_tudo() -> void:
 	_moedas_cache = GerenciadorMundo.moedas
-	_atualizar_digitos(_digitos_moedas, _moedas_cache)
+	_atualizar_label_valor(_label_moedas, _moedas_cache)
 	_mel_cache = _contar_mel_inventario()
-	_atualizar_digitos(_digitos_mel, _mel_cache)
+	_atualizar_label_valor(_label_mel, _mel_cache)
+	_dia_cache = GerenciadorMundo.dia_atual
+	_periodo_cache = GerenciadorMundo.periodo_eh_dia
+	_minuto_dia_cache = _obter_minuto_do_dia_atual()
+	_atualizar_label_dia_periodo()
+	_atualizar_lista_tipos_mel()
+	_reposicionar_hud()
 
 
 func _contar_mel_inventario() -> int:
 	if _inventario == null:
 		return 0
 	return _inventario.contar_total_mel()
+
+
+## Atualiza o texto do contador de dia e período atual (dia/noite).
+func _atualizar_label_dia_periodo() -> void:
+	if _label_dia_periodo == null:
+		return
+	var periodo: String = "DIA" if GerenciadorMundo.periodo_eh_dia else "NOITE"
+	var horario: String = _obter_horario_do_mundo_formatado()
+	_label_dia_periodo.text = "DIA %d  |  %s  |  %s" % [maxi(GerenciadorMundo.dia_atual, 1), periodo, horario]
+
+
+## Retorna o nó do mundo atual para consultar horário e duração de ciclo.
+func _obter_mundo_atual() -> Node:
+	var cena_atual: Node = get_tree().current_scene
+	if cena_atual != null and cena_atual.has_method("obter_horario_formatado"):
+		return cena_atual
+	return null
+
+
+## Retorna o minuto atual do dia (0..1439) para controle de atualização da HUD.
+func _obter_minuto_do_dia_atual() -> int:
+	var mundo: Node = _obter_mundo_atual()
+	if mundo != null and mundo.has_method("obter_minuto_do_dia"):
+		return int(mundo.obter_minuto_do_dia())
+
+	var duracao_ciclo_padrao: float = 900.0
+	var fracao_ciclo: float = 0.0
+	if duracao_ciclo_padrao > 0.1:
+		fracao_ciclo = fposmod(GerenciadorMundo.tempo_ciclo_dia_noite, duracao_ciclo_padrao) / duracao_ciclo_padrao
+	var hora_decimal: float = fposmod(fracao_ciclo * 24.0 + 5.0, 24.0)
+	return int(floor(hora_decimal * 60.0))
+
+
+## Retorna o horário formatado em HH:MM para exibição no card de dia/noite.
+func _obter_horario_do_mundo_formatado() -> String:
+	var mundo: Node = _obter_mundo_atual()
+	if mundo != null and mundo.has_method("obter_horario_formatado"):
+		return String(mundo.obter_horario_formatado())
+
+	var minuto_total: int = clampi(_obter_minuto_do_dia_atual(), 0, 1439)
+	@warning_ignore("integer_division")
+	var horas: int = minuto_total / 60
+	var minutos: int = minuto_total % 60
+	return "%02d:%02d" % [horas, minutos]
+
+
+# --- LISTA LATERAL DE MELS ---
+
+## Cria o painel lateral de tipos de mel no canto direito da tela.
+func _criar_painel_tipos_mel() -> void:
+	_painel_tipos_mel = PanelContainer.new()
+	_painel_tipos_mel.name = "PainelTiposMel"
+	_painel_tipos_mel.visible = false
+	_painel_tipos_mel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_painel_tipos_mel.custom_minimum_size = Vector2(260.0, 0.0)
+	_painel_tipos_mel.add_theme_stylebox_override("panel", _criar_stylebox_painel_tipos_mel())
+	add_child(_painel_tipos_mel)
+
+	var coluna := VBoxContainer.new()
+	coluna.add_theme_constant_override("separation", 8)
+	_painel_tipos_mel.add_child(coluna)
+
+	var titulo := Label.new()
+	titulo.text = "TIPOS DE MEL"
+	titulo.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	titulo.add_theme_font_size_override("font_size", 20)
+	titulo.add_theme_color_override("font_color", Color(0.47, 0.33, 0.05))
+
+	coluna.add_child(titulo)
+
+	_lista_tipos_mel = VBoxContainer.new()
+	_lista_tipos_mel.add_theme_constant_override("separation", 6)
+	coluna.add_child(_lista_tipos_mel)
+
+
+## Cria o stylebox do painel de tipos de mel no padrão visual do jogo.
+func _criar_stylebox_painel_tipos_mel() -> StyleBoxFlat:
+	var estilo := StyleBoxFlat.new()
+	estilo.bg_color = Color(0.95, 0.92, 0.85, 0.94)
+	estilo.border_color = Color(0.52, 0.46, 0.38)
+	estilo.border_width_top = 2
+	estilo.border_width_right = 2
+	estilo.border_width_bottom = 6
+	estilo.border_width_left = 2
+	estilo.corner_radius_top_left = 12
+	estilo.corner_radius_top_right = 12
+	estilo.corner_radius_bottom_right = 12
+	estilo.corner_radius_bottom_left = 12
+	estilo.content_margin_top = 12
+	estilo.content_margin_bottom = 12
+	estilo.content_margin_left = 12
+	estilo.content_margin_right = 12
+	return estilo
+
+
+## Cria o stylebox do painel de resumo de recursos da HUD.
+func _criar_stylebox_painel_resumo() -> StyleBoxFlat:
+	var estilo := StyleBoxFlat.new()
+	estilo.bg_color = Color(0.95, 0.92, 0.85, 0.95)
+	estilo.border_color = Color(0.52, 0.46, 0.38)
+	estilo.border_width_top = 3
+	estilo.border_width_right = 3
+	estilo.border_width_bottom = 8
+	estilo.border_width_left = 3
+	estilo.corner_radius_top_left = 14
+	estilo.corner_radius_top_right = 14
+	estilo.corner_radius_bottom_right = 14
+	estilo.corner_radius_bottom_left = 14
+	estilo.content_margin_top = 12
+	estilo.content_margin_bottom = 12
+	estilo.content_margin_left = 12
+	estilo.content_margin_right = 12
+	return estilo
+
+
+## Cria o stylebox dos cards individuais de recursos (moedas e mel total).
+func _criar_stylebox_card_recurso() -> StyleBoxFlat:
+	var estilo := StyleBoxFlat.new()
+	estilo.bg_color = Color(0.99, 0.96, 0.89, 0.95)
+	estilo.border_color = Color(0.62, 0.54, 0.40)
+	estilo.border_width_top = 1
+	estilo.border_width_right = 1
+	estilo.border_width_bottom = 4
+	estilo.border_width_left = 1
+	estilo.corner_radius_top_left = 10
+	estilo.corner_radius_top_right = 10
+	estilo.corner_radius_bottom_right = 10
+	estilo.corner_radius_bottom_left = 10
+	estilo.content_margin_top = 6
+	estilo.content_margin_bottom = 6
+	estilo.content_margin_left = 10
+	estilo.content_margin_right = 10
+	return estilo
+
+
+## Cria o fundo do valor numérico para aumentar o contraste e sensação de profundidade.
+func _criar_stylebox_placa_valor() -> StyleBoxFlat:
+	var estilo := StyleBoxFlat.new()
+	estilo.bg_color = Color(0.36, 0.27, 0.16, 0.95)
+	estilo.border_color = Color(0.75, 0.63, 0.44, 0.9)
+	estilo.border_width_top = 1
+	estilo.border_width_right = 1
+	estilo.border_width_bottom = 4
+	estilo.border_width_left = 1
+	estilo.corner_radius_top_left = 8
+	estilo.corner_radius_top_right = 8
+	estilo.corner_radius_bottom_right = 8
+	estilo.corner_radius_bottom_left = 8
+	estilo.content_margin_top = 4
+	estilo.content_margin_bottom = 4
+	estilo.content_margin_left = 8
+	estilo.content_margin_right = 8
+	return estilo
+
+
+## Reposiciona os painéis da HUD no canto direito respeitando o tamanho atual da tela.
+func _reposicionar_hud() -> void:
+	var tela: Vector2 = get_viewport().get_visible_rect().size
+	if _painel_resumo != null:
+		_painel_resumo.position = Vector2(tela.x - 324.0, 14.0)
+	if _painel_tipos_mel != null and _painel_resumo != null:
+		var y_tipos: float = _painel_resumo.position.y + _painel_resumo.size.y + 10.0
+		_painel_tipos_mel.position = Vector2(tela.x - 286.0, y_tipos)
+
+
+## Atualiza a lista de tipos de mel exibindo apenas os tipos com quantidade maior que zero.
+func _atualizar_lista_tipos_mel() -> void:
+	if _painel_tipos_mel == null or _lista_tipos_mel == null:
+		return
+
+	for filho in _lista_tipos_mel.get_children():
+		filho.queue_free()
+
+	if _inventario == null:
+		_painel_tipos_mel.visible = false
+		return
+
+	var possui_algum_mel: bool = false
+	for id_item in _inventario.listar_ids_itens():
+		var id_texto: String = String(id_item)
+		if not id_texto.begins_with("mel"):
+			continue
+		var quantidade: int = _inventario.contar_item_por_id(id_texto)
+		if quantidade <= 0:
+			continue
+		var item: Item = _inventario.obter_item_por_id(id_texto)
+		var nome_exibicao: String = id_texto
+		if item != null and not item.nome_exibicao.is_empty():
+			nome_exibicao = item.nome_exibicao
+
+		var capacidade_tipo: int = 0
+		if _inventario.has_method("obter_capacidade_por_id"):
+			capacidade_tipo = int(_inventario.call("obter_capacidade_por_id", id_texto))
+
+		var card := PanelContainer.new()
+		card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		card.add_theme_stylebox_override("panel", _criar_stylebox_card_recurso())
+		_lista_tipos_mel.add_child(card)
+
+		var linha := HBoxContainer.new()
+		linha.add_theme_constant_override("separation", 8)
+		card.add_child(linha)
+
+		var lbl_nome := Label.new()
+		lbl_nome.text = nome_exibicao
+		lbl_nome.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		lbl_nome.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		lbl_nome.add_theme_font_size_override("font_size", 15)
+		lbl_nome.add_theme_color_override("font_color", Color(0.33, 0.22, 0.0))
+
+		linha.add_child(lbl_nome)
+
+		var lbl_qtd := Label.new()
+		if capacidade_tipo > 0:
+			lbl_qtd.text = "%d/%d" % [quantidade, capacidade_tipo]
+		else:
+			lbl_qtd.text = str(quantidade)
+		lbl_qtd.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		lbl_qtd.add_theme_font_size_override("font_size", 15)
+		lbl_qtd.add_theme_color_override("font_color", Color(0.50, 0.34, 0.0))
+
+		linha.add_child(lbl_qtd)
+		possui_algum_mel = true
+
+	_painel_tipos_mel.visible = possui_algum_mel

@@ -7,7 +7,7 @@ class_name GerenciadorMundo
 # --- DADOS DO JOGADOR ---
 
 ## Saldo atual de moedas do jogador
-static var moedas: int = 10000
+static var moedas: int = 100
 
 ## Total histórico de mel coletado — nunca diminui, é estatística do jogo
 static var total_mel_coletado: int = 0
@@ -18,6 +18,27 @@ static var hexagonos_desbloqueados: Array = []
 ## Estado individual de cada colmeia; chave = id_colmeia, valor = dict com progresso e abelha
 ## Ex: { "colmeia_principal": { "progresso_mel": 0.5, "estado_abelha": 0, ... } }
 static var estado_colmeias: Dictionary = {}
+
+## Dia atual do ciclo de mundo (inicia no dia 1)
+static var dia_atual: int = 1
+
+## Tempo acumulado dentro do ciclo dia/noite atual em segundos
+static var tempo_ciclo_dia_noite: float = 0.0
+
+## True quando o mundo está em período diurno; false para noturno
+static var periodo_eh_dia: bool = true
+
+## Posição do jogador no momento do último save (Vector3 serializado como dict)
+static var posicao_jogador: Dictionary = {}
+
+## Conquistas desbloqueadas pelo jogador; chave = id da conquista, valor = true
+static var conquistas: Dictionary = {}
+
+## True quando o som de zumbido das abelhas está ativado
+static var som_abelhas_ativo: bool = true
+
+## Estado do inventário do jogador; lista de {"id": String, "quantidade": int, "recurso": String}
+static var inventario_jogador: Array = []
 
 
 # --- CONSTANTES ---
@@ -36,6 +57,13 @@ static func salvar() -> void:
 		"total_mel_coletado": total_mel_coletado,
 		"hexagonos_desbloqueados": hexagonos_desbloqueados.duplicate(true),
 		"estado_colmeias": estado_colmeias.duplicate(true),
+		"dia_atual": dia_atual,
+		"tempo_ciclo_dia_noite": tempo_ciclo_dia_noite,
+		"periodo_eh_dia": periodo_eh_dia,
+		"posicao_jogador": posicao_jogador,
+		"conquistas": conquistas.duplicate(true),
+		"som_abelhas_ativo": som_abelhas_ativo,
+		"inventario_jogador": inventario_jogador.duplicate(true),
 	}
 	var arquivo := FileAccess.open(CAMINHO_SAVE, FileAccess.WRITE)
 	if arquivo == null:
@@ -79,6 +107,34 @@ static func carregar() -> void:
 	# Estado das colmeias — campo novo; fallback = dict vazio
 	if resultado.has("estado_colmeias") and resultado["estado_colmeias"] is Dictionary:
 		estado_colmeias = resultado["estado_colmeias"]
+
+	# Dia atual — fallback = 1
+	if resultado.has("dia_atual"):
+		dia_atual = maxi(int(resultado["dia_atual"]), 1)
+
+	# Tempo do ciclo dia/noite — fallback = 0.0
+	if resultado.has("tempo_ciclo_dia_noite"):
+		tempo_ciclo_dia_noite = maxf(float(resultado["tempo_ciclo_dia_noite"]), 0.0)
+
+	# Estado atual do período (dia/noite) — fallback = true
+	if resultado.has("periodo_eh_dia"):
+		periodo_eh_dia = bool(resultado["periodo_eh_dia"])
+
+	# Posição do jogador — fallback = dict vazio (spawn padrão)
+	if resultado.has("posicao_jogador") and resultado["posicao_jogador"] is Dictionary:
+		posicao_jogador = resultado["posicao_jogador"]
+
+	# Conquistas desbloqueadas — fallback = dict vazio
+	if resultado.has("conquistas") and resultado["conquistas"] is Dictionary:
+		conquistas = resultado["conquistas"]
+
+	# Som das abelhas — fallback = true (ativado)
+	if resultado.has("som_abelhas_ativo"):
+		som_abelhas_ativo = bool(resultado["som_abelhas_ativo"])
+
+	# Inventário do jogador — fallback = array vazio
+	if resultado.has("inventario_jogador") and resultado["inventario_jogador"] is Array:
+		inventario_jogador = resultado["inventario_jogador"]
 
 
 # --- OPERAÇÕES DE MOEDAS ---

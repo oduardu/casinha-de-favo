@@ -24,7 +24,6 @@ func _ready() -> void:
 	_setup_collision()  # Cria o chão físico para o jogador colidir
 	_setup_navigation() # Define a área navegável para o pathfinding
 	_place_farm_tiles() # Posiciona os tiles de fazenda no mapa e conecta ao player
-	_setup_hotbar()     # Instancia a UI da hotbar numa CanvasLayer
 	_dar_itens_iniciais() # Dá flores iniciais ao jogador para teste
 	# Conecta o PathVisualizer ao agente de navegação do jogador
 	var agent: NavigationAgent3D = $Player.get_node("NavigationAgent3D")
@@ -96,14 +95,6 @@ func _place_farm_tiles() -> void:
 		tile.jogador_entrou.connect(func(): player._ao_entrar_tile(tile))
 		tile.jogador_saiu.connect(player._ao_sair_tile)
 
-func _setup_hotbar() -> void:
-	# Cria uma CanvasLayer para garantir que a hotbar renderize em cima de tudo
-	var canvas := CanvasLayer.new()
-	canvas.name = "UILayer"
-	var hotbar_cena: PackedScene = load("res://scenes/hotbar.tscn")
-	var hotbar: Control = hotbar_cena.instantiate() as Control
-	canvas.add_child(hotbar)
-	add_child(canvas)
 
 func _dar_itens_iniciais() -> void:
 	# Carrega o item flor e adiciona 5 unidades ao inventário do jogador para teste

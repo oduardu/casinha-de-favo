@@ -9,13 +9,21 @@ extends Node3D
 @export var preco_base: int = 10
 
 ## Moedas iniciais adicionadas ao GerenciadorMundo na primeira inicialização do jogo
-@export var moedas_debug: int = 10000
 
 ## Caminho da trilha sonora ambiente medieval tocada em loop durante o jogo
 @export var caminho_soundtrack: String = "res://resources/audio/soundtrack.mp3"
 
 ## Volume base da trilha sonora ambiente em dB
 @export var volume_soundtrack_db: float = -8.5
+
+## Duração total do ciclo dia/noite em segundos (15 minutos)
+@export var duracao_ciclo_dia_noite_segundos: float = 900.0
+
+## Intensidade máxima da luz direcional durante o dia
+@export var energia_luz_dia: float = 1.6
+
+## Intensidade da luz direcional durante a noite
+@export var energia_luz_noite: float = 0.12
 
 
 # --- CONSTANTES ---
@@ -62,21 +70,27 @@ const COORDS_CAMINHO_LIVRE: Array[Vector2i] = [
 const CHANCE_SPAWN_COLMEIA_EM_COMPRA: float = 0.25
 
 ## Raridades possíveis para colmeias geradas em compra de terreno
-const RARIDADES_COLMEIA_SORTEIO: Array[String] = ["comum", "incomum", "rara", "epica", "lendaria"]
+const RARIDADES_COLMEIA_SORTEIO: Array[String] = ["comum", "rara", "epica", "lendaria"]
 
 ## Distribuição de raridade no centro do mapa (soma 100%).
 ## Predomínio de comum conforme solicitado.
-const DISTRIBUICAO_RARIDADE_CENTRO: Array[float] = [65.0, 22.0, 8.0, 4.0, 1.0]
+const DISTRIBUICAO_RARIDADE_CENTRO: Array[float] = [70.0, 18.0, 8.0, 4.0]
 
 ## Distribuição de raridade no limite do mapa (soma 100%).
 ## Comum reduz, demais raridades aumentam ao se afastar.
-const DISTRIBUICAO_RARIDADE_BORDA: Array[float] = [35.0, 30.0, 18.0, 11.0, 6.0]
+const DISTRIBUICAO_RARIDADE_BORDA: Array[float] = [40.0, 30.0, 20.0, 10.0]
 
 ## Tipo visual de hexágono usado nos tiles que possuem colmeia
 const TIPO_TILE_COLMEIA_NORMAL: String = "colmeia-normal"
 
 ## Tipo visual de hexágono usado nos tiles de colmeia rara
 const TIPO_TILE_COLMEIA_RARA: String = "colmeia-rara"
+
+## Tipo visual de hexágono usado nos tiles de colmeia épica
+const TIPO_TILE_COLMEIA_EPICA: String = "colmeia-epica"
+
+## Tipo visual de hexágono usado nos tiles de colmeia lendária
+const TIPO_TILE_COLMEIA_LENDARIA: String = "colmeia-lendaria"
 
 ## Texto exibido no painel de licenças do menu ESC.
 const TEXTO_LICENCAS_MENU: String = """RECURSOS E LICENCAS
@@ -103,7 +117,6 @@ const TEXTO_LICENCAS_MENU: String = """RECURSOS E LICENCAS
 3) Zumbido de abelha
 - Arquivo: res://resources/audio/abelha_base.ogg
 - Fonte original: https://www.youtube.com/watch?v=0qv-fq5o1H0
-- Observacao: para distribuicao publica/comercial, confirme direitos de uso do audio original.
 
 4) Engine
 - Godot Engine 4.x
@@ -147,12 +160,62 @@ var _rng_eventos: RandomNumberGenerator = RandomNumberGenerator.new()
 ## Player de áudio 2D global para trilha sonora de ambiente
 var _audio_soundtrack: AudioStreamPlayer = null
 
+## Luz direcional principal que representa o sol
+var _luz_sol: DirectionalLight3D = null
+
+## Luz direcional secundária que representa a lua
+var _luz_lua: DirectionalLight3D = null
+
+## WorldEnvironment principal para ajustar cor/ambiente ao longo do ciclo
+var _world_environment: WorldEnvironment = null
+
+## Referência ao comerciante de mel para controlar aparição por período
+var _npc_comprador: NPC = null
+
+## Tempo acumulado no ciclo dia/noite atual
+var _tempo_ciclo_dia_noite: float = 0.0
+
+## Dia atual do mundo (incrementa ao fim de cada ciclo completo)
+var _dia_atual: int = 1
+
+## True quando está de dia no ciclo atual
+var _periodo_eh_dia: bool = true
+
+## Área de descanso na casa que permite avançar para o próximo dia à noite
+var _area_descanso_casa: Area3D = null
+
+## Label 3D de dica para deitar na casa durante a noite
+var _hint_descanso_casa: Label3D = null
+
+## True enquanto o jogador está dentro da área de descanso da casa
+var _jogador_perto_descanso: bool = false
+
+## Label do aviso de dormir (filho do painel estilizado)
+var _label_aviso_dormir: Label = null
+
+## Container raiz do aviso de dormir (painel + label)
+var _container_aviso_dormir: Control = null
+
+## Container raiz do popup de conquista
+var _container_conquista: Control = null
+
+## Label do titulo da conquista
+var _label_conquista_titulo: Label = null
+
+## Label da descricao da conquista
+var _label_conquista_descricao: Label = null
+
 
 # --- CICLO DE VIDA ---
 
 ## Salva ao fechar a janela, já que GerenciadorMundo não é um Node
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		_salvar_posicao_jogador()
+		_salvar_estado_ciclo_dia_noite()
+		var inv_save: Node = get_node_or_null("Player/Inventario")
+		if inv_save != null and inv_save.has_method("salvar_inventario"):
+			inv_save.salvar_inventario()
 		GerenciadorMundo.salvar()
 
 
@@ -162,9 +225,10 @@ func _ready() -> void:
 	_configurar_soundtrack()
 	_carregar_recursos()
 	GerenciadorMundo.carregar()
-	# Garante que o jogador começa com pelo menos moedas_debug moedas @todo remover
-	if GerenciadorMundo.moedas < moedas_debug:
-		GerenciadorMundo.moedas = moedas_debug
+	# Restaura o inventário do jogador após o save estar carregado
+	var inv: Node = $Player.get_node_or_null("Inventario")
+	if inv != null and inv.has_method("carregar_do_save"):
+		inv.carregar_do_save()
 	_rng_eventos.randomize()
 	_calcular_deslocamento()
 	_gerar_grade_inicial()
@@ -173,6 +237,7 @@ func _ready() -> void:
 	_reconstruir_navmesh()
 	_criar_piso()
 	_colocar_edificios()
+	_preparar_ciclo_dia_noite()
 	_setup_ui()
 	_criar_menu_pausa()
 
@@ -180,6 +245,28 @@ func _ready() -> void:
 	var agente = $Player.get_node("NavigationAgent3D")
 	if agente != null and $PathVisualizer != null:
 		$PathVisualizer.setup(agente)
+	_restaurar_posicao_jogador()
+	set_process(true)
+
+
+## Atualiza ciclo dia/noite e estado de período enquanto o jogo estiver ativo.
+func _process(delta: float) -> void:
+	if get_tree().paused:
+		return
+	if duracao_ciclo_dia_noite_segundos <= 0.1:
+		return
+	var tempo_anterior: float = _tempo_ciclo_dia_noite
+	_tempo_ciclo_dia_noite = fposmod(_tempo_ciclo_dia_noite + delta, duracao_ciclo_dia_noite_segundos)
+	if tempo_anterior > _tempo_ciclo_dia_noite:
+		_dia_atual += 1
+		_salvar_estado_ciclo_dia_noite()
+	_aplicar_iluminacao_ciclo_dia_noite()
+
+	var periodo_atual: bool = _calcular_periodo_eh_dia()
+	if periodo_atual != _periodo_eh_dia:
+		_periodo_eh_dia = periodo_atual
+		_aplicar_estado_periodo()
+		_salvar_estado_ciclo_dia_noite()
 
 
 # --- INPUT ---
@@ -239,6 +326,263 @@ func _configurar_soundtrack() -> void:
 	_audio_soundtrack.autoplay = false
 	add_child(_audio_soundtrack)
 	_audio_soundtrack.play()
+
+
+# --- CICLO DIA/NOITE ---
+
+## Inicializa referências e estado persistido do ciclo de dia/noite.
+func _preparar_ciclo_dia_noite() -> void:
+	_luz_sol = get_node_or_null("DirectionalLight3D") as DirectionalLight3D
+	if _luz_sol == null:
+		_luz_sol = DirectionalLight3D.new()
+		_luz_sol.name = "DirectionalLight3D"
+		add_child(_luz_sol)
+	_luz_sol.visible = true
+	_luz_sol.shadow_enabled = true
+	_luz_sol.shadow_bias = 0.02
+	_luz_sol.directional_shadow_max_distance = 80.0
+
+	_luz_lua = get_node_or_null("DirectionalLightLua") as DirectionalLight3D
+	if _luz_lua == null:
+		_luz_lua = DirectionalLight3D.new()
+		_luz_lua.name = "DirectionalLightLua"
+		add_child(_luz_lua)
+	_luz_lua.visible = true
+	_luz_lua.shadow_enabled = false
+	_luz_lua.light_color = Color(0.40, 0.55, 0.95)
+
+	_world_environment = get_node_or_null("WorldEnvironment") as WorldEnvironment
+	_dia_atual = maxi(GerenciadorMundo.dia_atual, 1)
+	# Se não há save (tempo = 0.0 padrão), inicia o ciclo às 06:00 em vez de 05:00
+	var tempo_salvo: float = GerenciadorMundo.tempo_ciclo_dia_noite
+	if tempo_salvo <= 0.0:
+		tempo_salvo = duracao_ciclo_dia_noite_segundos / 24.0
+	_tempo_ciclo_dia_noite = clampf(
+		tempo_salvo,
+		0.0,
+		maxf(duracao_ciclo_dia_noite_segundos - 0.001, 0.0)
+	)
+	_periodo_eh_dia = _calcular_periodo_eh_dia()
+	_aplicar_iluminacao_ciclo_dia_noite()
+	_aplicar_estado_periodo()
+	_salvar_estado_ciclo_dia_noite()
+
+
+## Retorna true quando o tempo atual do ciclo está no período diurno (05:00–19:00).
+func _calcular_periodo_eh_dia() -> bool:
+	if duracao_ciclo_dia_noite_segundos <= 0.1:
+		return true
+	var hora_atual: float = _obter_hora_decimal_ciclo(_tempo_ciclo_dia_noite)
+	return hora_atual >= 5.0 and hora_atual < 19.0
+
+
+## Converte o tempo acumulado do ciclo para hora decimal (0.0 a <24.0).
+## O início do ciclo corresponde às 05:00 para manter o começo do jogo durante o dia.
+func _obter_hora_decimal_ciclo(tempo_ciclo: float) -> float:
+	if duracao_ciclo_dia_noite_segundos <= 0.1:
+		return 12.0
+	var fracao_ciclo: float = fposmod(tempo_ciclo, duracao_ciclo_dia_noite_segundos) / duracao_ciclo_dia_noite_segundos
+	return fposmod(fracao_ciclo * 24.0 + 5.0, 24.0)
+
+
+## Retorna a hora atual do mundo em formato decimal (0.0 a <24.0).
+func obter_hora_do_dia() -> float:
+	return _obter_hora_decimal_ciclo(_tempo_ciclo_dia_noite)
+
+
+## Retorna o minuto do dia atual (0 a 1439) com base no ciclo.
+func obter_minuto_do_dia() -> int:
+	return int(floor(obter_hora_do_dia() * 60.0))
+
+
+## Retorna o horário atual formatado em HH:MM para UI/HUD.
+func obter_horario_formatado() -> String:
+	var minuto_total: int = clampi(obter_minuto_do_dia(), 0, 1439)
+	@warning_ignore("integer_division")
+	var horas: int = minuto_total / 60
+	var minutos: int = minuto_total % 60
+	return "%02d:%02d" % [horas, minutos]
+
+
+## Aplica iluminação e ambiente com base no tempo atual do ciclo (dia 05:00–19:00).
+func _aplicar_iluminacao_ciclo_dia_noite() -> void:
+	if _luz_sol == null and _luz_lua == null and _world_environment == null:
+		return
+	var hora_atual: float = _obter_hora_decimal_ciclo(_tempo_ciclo_dia_noite)
+	var fator_sol: float = 0.0
+	if hora_atual >= 5.0 and hora_atual < 19.0:
+		var t_sol: float = (hora_atual - 5.0) / 14.0
+		fator_sol = sin(t_sol * PI)
+
+	var fator_lua: float = 0.0
+	if hora_atual >= 19.0 or hora_atual < 5.0:
+		var hora_noturna: float = hora_atual if hora_atual >= 19.0 else hora_atual + 24.0
+		var t_lua: float = (hora_noturna - 19.0) / 10.0
+		fator_lua = sin(t_lua * PI)
+
+	# Ângulo X do sol limitado entre -50° e -70° para evitar sombras rasantes entre tiles
+	# No meio-dia (t_sol=0.5) o sol fica a -70° (quase vertical); no nascer/pôr a -50°
+	var angulo_sol_x: float = -60.0
+	if fator_sol > 0.0:
+		angulo_sol_x = lerpf(-50.0, -70.0, sin(((hora_atual - 5.0) / 14.0) * PI))
+
+	var angulo_lua_x: float = -55.0
+
+	if _luz_sol != null:
+		_luz_sol.rotation_degrees.x = angulo_sol_x
+		_luz_sol.rotation_degrees.y = 0.0  # Sombra cai reta, sem diagonal entre tiles
+		_luz_sol.light_energy = lerpf(0.0, energia_luz_dia, fator_sol)
+		_luz_sol.light_color = Color(1.0, 0.85, 0.55)
+
+	if _luz_lua != null:
+		_luz_lua.rotation_degrees.x = angulo_lua_x
+		_luz_lua.rotation_degrees.y = 0.0
+		_luz_lua.light_energy = lerpf(0.0, energia_luz_noite, fator_lua)
+
+	var fator_iluminacao_ambiente: float = clampf(fator_sol + (fator_lua * 0.18), 0.0, 1.0)
+	if _world_environment != null and _world_environment.environment != null:
+		var env: Environment = _world_environment.environment
+		env.ambient_light_energy = lerpf(0.05, 0.32, fator_iluminacao_ambiente)
+		env.background_color = Color(0.06, 0.09, 0.17).lerp(Color(0.12, 0.35, 0.62), fator_iluminacao_ambiente)
+
+
+## Aplica efeitos de gameplay do período: abelhas, NPC, hint da cama e aviso de dormir.
+func _aplicar_estado_periodo() -> void:
+	for no_colmeia in get_tree().get_nodes_in_group("colmeia"):
+		if no_colmeia.has_method("definir_periodo_dia"):
+			no_colmeia.definir_periodo_dia(_periodo_eh_dia)
+	if _npc_comprador != null and is_instance_valid(_npc_comprador):
+		_npc_comprador.definir_disponibilidade_no_periodo(_periodo_eh_dia)
+	_atualizar_hint_descanso_casa()
+	if not _periodo_eh_dia:
+		_mostrar_aviso_dormir()
+	else:
+		_esconder_aviso_dormir()
+
+
+## Exibe o aviso de dormir com animação de fade-in e esconde após 5 segundos.
+func _mostrar_aviso_dormir() -> void:
+	if _container_aviso_dormir == null:
+		return
+	_container_aviso_dormir.modulate = Color(1.0, 1.0, 1.0, 0.0)
+	_container_aviso_dormir.visible = true
+	var tween := create_tween()
+	tween.tween_property(_container_aviso_dormir, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.8) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tween.tween_interval(4.0)
+	tween.tween_property(_container_aviso_dormir, "modulate", Color(1.0, 1.0, 1.0, 0.0), 1.2) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	tween.tween_callback(_container_aviso_dormir.set_visible.bind(false))
+
+
+## Esconde o aviso de dormir imediatamente (ex.: quando amanhecer).
+func _esconder_aviso_dormir() -> void:
+	if _container_aviso_dormir == null:
+		return
+	_container_aviso_dormir.visible = false
+
+
+# --- CONQUISTAS ---
+
+## Tenta desbloquear uma conquista; exibe popup se for a primeira vez.
+func _desbloquear_conquista(id: String, titulo: String, descricao: String) -> void:
+	if GerenciadorMundo.conquistas.has(id):
+		return
+	GerenciadorMundo.conquistas[id] = true
+	GerenciadorMundo.salvar()
+	_mostrar_popup_conquista(titulo, descricao)
+
+
+## Exibe o popup de conquista com fade-in, permanencia e fade-out.
+func _mostrar_popup_conquista(titulo: String, descricao: String) -> void:
+	if _container_conquista == null:
+		return
+	_label_conquista_titulo.text = titulo
+	_label_conquista_descricao.text = descricao
+	_container_conquista.modulate = Color(1.0, 1.0, 1.0, 0.0)
+	_container_conquista.scale = Vector2(0.8, 0.8)
+	_container_conquista.visible = true
+	# Fase 1: fade-in + scale-in em paralelo
+	var tween := create_tween()
+	tween.tween_property(_container_conquista, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.6) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tween.parallel().tween_property(_container_conquista, "scale", Vector2.ONE, 0.5) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	# Fase 2: espera visível
+	tween.tween_interval(8.0)
+	# Fase 3: fade-out e esconde
+	tween.tween_property(_container_conquista, "modulate", Color(1.0, 1.0, 1.0, 0.0), 1.5) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	tween.tween_callback(_container_conquista.set_visible.bind(false))
+
+
+## Callback quando qualquer colmeia emite mel_coletado; verifica conquista de primeiro mel.
+func _ao_mel_coletado_conquista(_quantidade: int) -> void:
+	_desbloquear_conquista(
+		"primeiro_mel",
+		"\ud83c\udf6f Melzinho na chupeta! \ud83d\udc23",
+		"Voce coletou mel pela primeira vez!"
+	)
+
+
+## Persiste o estado atual do ciclo no GerenciadorMundo sem forçar I/O em disco.
+func _salvar_estado_ciclo_dia_noite() -> void:
+	GerenciadorMundo.dia_atual = _dia_atual
+	GerenciadorMundo.tempo_ciclo_dia_noite = _tempo_ciclo_dia_noite
+	GerenciadorMundo.periodo_eh_dia = _periodo_eh_dia
+
+
+## Salva a posição atual do jogador no GerenciadorMundo para persistência.
+func _salvar_posicao_jogador() -> void:
+	var jogador := get_node_or_null("Player")
+	if jogador == null:
+		return
+	var pos: Vector3 = jogador.global_position
+	GerenciadorMundo.posicao_jogador = {"x": pos.x, "y": pos.y, "z": pos.z}
+
+
+## Restaura a posição do jogador a partir do save, se existir.
+func _restaurar_posicao_jogador() -> void:
+	var dados: Dictionary = GerenciadorMundo.posicao_jogador
+	if dados.is_empty():
+		return
+	if not dados.has("x") or not dados.has("y") or not dados.has("z"):
+		return
+	var jogador := get_node_or_null("Player")
+	if jogador == null:
+		return
+	jogador.global_position = Vector3(
+		float(dados["x"]),
+		float(dados["y"]),
+		float(dados["z"])
+	)
+
+
+## Retorna true quando está de dia para uso por outros scripts.
+func periodo_esta_dia() -> bool:
+	return _periodo_eh_dia
+
+
+## Tenta descansar na casa para avançar imediatamente para o próximo dia.
+func tentar_descansar(_jogador: Node) -> bool:
+	if _periodo_eh_dia:
+		return false
+	if not _jogador_perto_descanso:
+		return false
+	_avancar_para_proximo_dia_por_descanso()
+	return true
+
+
+## Avança para a manhã do próximo dia (06:00) e reaplica estado visual/gameplay.
+func _avancar_para_proximo_dia_por_descanso() -> void:
+	_dia_atual += 1
+	# Tempo correspondente às 06:00 — 1 hora após o início do ciclo (que começa às 05:00)
+	_tempo_ciclo_dia_noite = duracao_ciclo_dia_noite_segundos / 24.0
+	_periodo_eh_dia = true
+	_aplicar_iluminacao_ciclo_dia_noite()
+	_aplicar_estado_periodo()
+	_salvar_estado_ciclo_dia_noite()
+	GerenciadorMundo.salvar()
 
 
 # --- UTILITÁRIOS ---
@@ -378,7 +722,7 @@ func _criar_tile(coord: Vector2i, tipo: String, eh_desbloqueado: bool, custo: in
 			if jogador.has_method("_ao_sair_hex_compravel"):
 				tile.jogador_saiu_compravel.connect(jogador._ao_sair_hex_compravel)
 		tile.comprado.connect(
-			func(custo: int) -> void: _ao_tile_comprado(tile, custo)
+			func(custo_compra: int) -> void: _ao_tile_comprado(tile, custo_compra)
 		)
 
 
@@ -494,7 +838,7 @@ func _reconstruir_navmesh() -> void:
 		verts_3d.append(Vector3(p.x, 0.0, p.y))
 
 	var navmesh := NavigationMesh.new()
-	navmesh.cell_height = 0.1
+	navmesh.cell_height = 0.25
 	navmesh.vertices = verts_3d
 
 	# Cria um polígono com todos os índices do hull
@@ -552,6 +896,62 @@ func _criar_casa() -> void:
 	col.position.y = forma.height * 0.5
 	fis.add_child(col)
 	casa_raiz.add_child(fis)
+	_criar_ponto_descanso_casa(casa_raiz)
+
+
+## Cria a área de interação para dormir na casa e avançar para o próximo dia.
+func _criar_ponto_descanso_casa(casa_raiz: Node3D) -> void:
+	_area_descanso_casa = Area3D.new()
+	_area_descanso_casa.name = "AreaDescansoCasa"
+	var col := CollisionShape3D.new()
+	var forma := CylinderShape3D.new()
+	forma.radius = 3.5
+	forma.height = 4.0
+	col.shape = forma
+	col.position.y = 2.0
+	_area_descanso_casa.add_child(col)
+	_area_descanso_casa.body_entered.connect(_ao_entrar_area_descanso_casa)
+	_area_descanso_casa.body_exited.connect(_ao_sair_area_descanso_casa)
+	casa_raiz.add_child(_area_descanso_casa)
+
+	_hint_descanso_casa = Label3D.new()
+	_hint_descanso_casa.name = "HintDescansoCasa"
+	_hint_descanso_casa.text = "(E) Deitar para amanhecer"
+	_hint_descanso_casa.font_size = 42
+	_hint_descanso_casa.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_hint_descanso_casa.modulate = Color(0.82, 0.87, 1.0)
+	_hint_descanso_casa.position = Vector3(0.0, 2.0, 0.0)
+	_hint_descanso_casa.visible = false
+	casa_raiz.add_child(_hint_descanso_casa)
+
+
+## Callback quando o jogador entra na área da cama da casa.
+func _ao_entrar_area_descanso_casa(body: Node3D) -> void:
+	if not (body is CharacterBody3D):
+		return
+	_jogador_perto_descanso = true
+	var jogador := get_node_or_null("Player")
+	if jogador != null and jogador.has_method("_ao_entrar_ponto_descanso"):
+		jogador._ao_entrar_ponto_descanso(self)
+	_atualizar_hint_descanso_casa()
+
+
+## Callback quando o jogador sai da área da cama da casa.
+func _ao_sair_area_descanso_casa(body: Node3D) -> void:
+	if not (body is CharacterBody3D):
+		return
+	_jogador_perto_descanso = false
+	var jogador := get_node_or_null("Player")
+	if jogador != null and jogador.has_method("_ao_sair_ponto_descanso"):
+		jogador._ao_sair_ponto_descanso()
+	_atualizar_hint_descanso_casa()
+
+
+## Atualiza visibilidade da dica de descanso conforme distância e período.
+func _atualizar_hint_descanso_casa() -> void:
+	if _hint_descanso_casa == null:
+		return
+	_hint_descanso_casa.visible = _jogador_perto_descanso and not _periodo_eh_dia
 
 
 ## Instancia a Colmeia no tile (0, 0) e conecta seus sinais de proximidade ao Player
@@ -579,6 +979,8 @@ func _criar_colmeia_em_coord(coord: Vector2i, id_colmeia: String, raridade: Stri
 	if colmeia.has_method("configurar_raridade_colmeia"):
 		colmeia.configurar_raridade_colmeia(raridade)
 	add_child(colmeia)
+	if colmeia.has_method("definir_periodo_dia"):
+		colmeia.definir_periodo_dia(_periodo_eh_dia)
 
 	var jogador := get_node_or_null("Player")
 	if jogador != null:
@@ -588,6 +990,10 @@ func _criar_colmeia_em_coord(coord: Vector2i, id_colmeia: String, raridade: Stri
 			)
 		if colmeia.has_signal("jogador_saiu_colmeia") and jogador.has_method("_ao_sair_colmeia_area"):
 			colmeia.jogador_saiu_colmeia.connect(jogador._ao_sair_colmeia_area)
+
+	# Conecta sinal de mel coletado para verificar conquistas
+	if colmeia.has_signal("mel_coletado"):
+		colmeia.mel_coletado.connect(_ao_mel_coletado_conquista)
 	return colmeia
 
 
@@ -625,6 +1031,7 @@ func _criar_npc() -> void:
 	npc.position = _axial_para_mundo(Q_MIN + 1, R_MIN)  # (0, -1) — na frente da casa
 	npc.position.y = 0.0
 	add_child(npc)
+	_npc_comprador = npc as NPC
 
 	var jogador := get_node_or_null("Player")
 	if jogador != null:
@@ -638,6 +1045,8 @@ func _criar_npc() -> void:
 		var inv: Node = jogador.get_node_or_null("Inventario")
 		if inv != null and inv.has_signal("inventario_mudou") and npc.has_method("_ao_inventario_mudou"):
 			inv.inventario_mudou.connect(npc._ao_inventario_mudou)
+	if _npc_comprador != null and is_instance_valid(_npc_comprador):
+		_npc_comprador.definir_disponibilidade_no_periodo(_periodo_eh_dia)
 
 
 # --- COMPRA DE HEX ---
@@ -712,6 +1121,10 @@ func _obter_id_colmeia_para_coord(coord: Vector2i) -> String:
 ## Retorna o tipo visual de tile da colmeia com base na raridade.
 func _obter_tipo_tile_colmeia_por_raridade(raridade: String) -> String:
 	var raridade_normalizada: String = raridade.strip_edges().to_lower()
+	if raridade_normalizada == "lendaria":
+		return TIPO_TILE_COLMEIA_LENDARIA
+	if raridade_normalizada == "epica":
+		return TIPO_TILE_COLMEIA_EPICA
 	if raridade_normalizada == "rara":
 		return TIPO_TILE_COLMEIA_RARA
 	return TIPO_TILE_COLMEIA_NORMAL
@@ -750,6 +1163,133 @@ func _setup_ui() -> void:
 			canvas.add_child(ui_mel_cena.instantiate())
 	else:
 		push_warning("mundo.gd: ui_mel.tscn não encontrada.")
+
+	# Painel de aviso para ir dormir no estilo "placa de madeira" (invisível por padrão)
+	var raiz_aviso := Control.new()
+	raiz_aviso.name = "RaizAvisoDormir"
+	raiz_aviso.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	raiz_aviso.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	canvas.add_child(raiz_aviso)
+
+	_container_aviso_dormir = CenterContainer.new()
+	_container_aviso_dormir.name = "ContainerAvisoDormir"
+	_container_aviso_dormir.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	_container_aviso_dormir.anchor_left = 0.0
+	_container_aviso_dormir.anchor_right = 1.0
+	_container_aviso_dormir.anchor_top = 0.0
+	_container_aviso_dormir.anchor_bottom = 0.0
+	_container_aviso_dormir.offset_top = 50.0
+	_container_aviso_dormir.offset_bottom = 160.0
+	_container_aviso_dormir.offset_left = 0.0
+	_container_aviso_dormir.offset_right = 0.0
+	_container_aviso_dormir.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_container_aviso_dormir.visible = false
+	raiz_aviso.add_child(_container_aviso_dormir)
+
+	var painel_aviso := PanelContainer.new()
+	var estilo_aviso := StyleBoxFlat.new()
+	estilo_aviso.bg_color = Color(0.91, 0.87, 0.79, 0.96)
+	estilo_aviso.border_color = Color(0.52, 0.46, 0.38, 1.0)
+	estilo_aviso.border_width_top = 3
+	estilo_aviso.border_width_right = 3
+	estilo_aviso.border_width_bottom = 6
+	estilo_aviso.border_width_left = 3
+	estilo_aviso.corner_radius_top_left = 14
+	estilo_aviso.corner_radius_top_right = 14
+	estilo_aviso.corner_radius_bottom_right = 14
+	estilo_aviso.corner_radius_bottom_left = 14
+	estilo_aviso.shadow_color = Color(0.0, 0.0, 0.0, 0.22)
+	estilo_aviso.shadow_size = 3
+	estilo_aviso.content_margin_top = 20
+	estilo_aviso.content_margin_bottom = 20
+	estilo_aviso.content_margin_left = 36
+	estilo_aviso.content_margin_right = 36
+	painel_aviso.add_theme_stylebox_override("panel", estilo_aviso)
+	painel_aviso.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_container_aviso_dormir.add_child(painel_aviso)
+
+	_label_aviso_dormir = Label.new()
+	_label_aviso_dormir.text = "Hora de dormir! Va ate a casa para descansar."
+	_label_aviso_dormir.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_label_aviso_dormir.add_theme_font_size_override("font_size", 28)
+	_label_aviso_dormir.add_theme_color_override("font_color", Color(0.47, 0.33, 0.05))
+	_label_aviso_dormir.add_theme_constant_override("outline_size", 2)
+	_label_aviso_dormir.add_theme_color_override("font_outline_color", Color(1.0, 0.96, 0.88))
+	painel_aviso.add_child(_label_aviso_dormir)
+
+	# Popup de conquista em CanvasLayer próprio acima de todas as UIs (layer 30)
+	var canvas_conquista := CanvasLayer.new()
+	canvas_conquista.name = "CanvasConquista"
+	canvas_conquista.layer = 30
+	add_child(canvas_conquista)
+
+	var raiz_conquista := Control.new()
+	raiz_conquista.name = "RaizConquista"
+	raiz_conquista.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	raiz_conquista.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	canvas_conquista.add_child(raiz_conquista)
+
+	_container_conquista = CenterContainer.new()
+	_container_conquista.name = "ContainerConquista"
+	_container_conquista.anchor_left = 0.0
+	_container_conquista.anchor_right = 1.0
+	_container_conquista.anchor_top = 0.0
+	_container_conquista.anchor_bottom = 0.0
+	_container_conquista.offset_top = 50.0
+	_container_conquista.offset_bottom = 200.0
+	_container_conquista.offset_left = 0.0
+	_container_conquista.offset_right = 0.0
+	_container_conquista.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_container_conquista.visible = false
+	raiz_conquista.add_child(_container_conquista)
+
+	var painel_conquista := PanelContainer.new()
+	var estilo_conquista := StyleBoxFlat.new()
+	estilo_conquista.bg_color = Color(0.91, 0.87, 0.79, 0.96)
+	estilo_conquista.border_color = Color(0.52, 0.46, 0.38, 1.0)
+	estilo_conquista.border_width_top = 3
+	estilo_conquista.border_width_right = 3
+	estilo_conquista.border_width_bottom = 6
+	estilo_conquista.border_width_left = 3
+	estilo_conquista.corner_radius_top_left = 14
+	estilo_conquista.corner_radius_top_right = 14
+	estilo_conquista.corner_radius_bottom_right = 14
+	estilo_conquista.corner_radius_bottom_left = 14
+	estilo_conquista.shadow_color = Color(0.0, 0.0, 0.0, 0.22)
+	estilo_conquista.shadow_size = 3
+	estilo_conquista.content_margin_top = 22
+	estilo_conquista.content_margin_bottom = 22
+	estilo_conquista.content_margin_left = 36
+	estilo_conquista.content_margin_right = 36
+	painel_conquista.add_theme_stylebox_override("panel", estilo_conquista)
+	painel_conquista.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_container_conquista.add_child(painel_conquista)
+
+	var coluna_conquista := VBoxContainer.new()
+	coluna_conquista.add_theme_constant_override("separation", 10)
+	coluna_conquista.alignment = BoxContainer.ALIGNMENT_CENTER
+	painel_conquista.add_child(coluna_conquista)
+
+	var label_conquista_header := Label.new()
+	label_conquista_header.text = "Conquista desbloqueada!"
+	label_conquista_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label_conquista_header.add_theme_font_size_override("font_size", 20)
+	label_conquista_header.add_theme_color_override("font_color", Color(0.55, 0.45, 0.25))
+	coluna_conquista.add_child(label_conquista_header)
+
+	_label_conquista_titulo = Label.new()
+	_label_conquista_titulo.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_label_conquista_titulo.add_theme_font_size_override("font_size", 32)
+	_label_conquista_titulo.add_theme_color_override("font_color", Color(0.47, 0.33, 0.05))
+	_label_conquista_titulo.add_theme_constant_override("outline_size", 2)
+	_label_conquista_titulo.add_theme_color_override("font_outline_color", Color(1.0, 0.96, 0.88))
+	coluna_conquista.add_child(_label_conquista_titulo)
+
+	_label_conquista_descricao = Label.new()
+	_label_conquista_descricao.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_label_conquista_descricao.add_theme_font_size_override("font_size", 22)
+	_label_conquista_descricao.add_theme_color_override("font_color", Color(0.55, 0.45, 0.25))
+	coluna_conquista.add_child(_label_conquista_descricao)
 
 	add_child(canvas)
 
@@ -813,7 +1353,7 @@ func _criar_menu_pausa() -> void:
 
 	# Título
 	var titulo := Label.new()
-	titulo.text = "PAUSA"
+	titulo.text = "MENU"
 	titulo.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	titulo.add_theme_font_size_override("font_size", 44)
 	titulo.add_theme_color_override("font_color", Color(0.50, 0.34, 0.0))
@@ -847,6 +1387,19 @@ func _criar_menu_pausa() -> void:
 	_aplicar_estilo_botao_menu_pausa(btn_licencas, "secundario")
 	btn_licencas.pressed.connect(_abrir_licencas_menu_pausa)
 	container.add_child(btn_licencas)
+
+	# Checkbox para som das abelhas
+	var check_som_abelhas := CheckBox.new()
+	check_som_abelhas.name = "CheckSomAbelhas"
+	check_som_abelhas.text = "  Som das abelhas"
+	check_som_abelhas.button_pressed = GerenciadorMundo.som_abelhas_ativo
+	check_som_abelhas.add_theme_font_size_override("font_size", 22)
+	check_som_abelhas.add_theme_color_override("font_color", Color(0.47, 0.33, 0.05))
+	check_som_abelhas.add_theme_color_override("font_hover_color", Color(0.47, 0.33, 0.05))
+	check_som_abelhas.add_theme_color_override("font_pressed_color", Color(0.47, 0.33, 0.05))
+	check_som_abelhas.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	check_som_abelhas.toggled.connect(_ao_alternar_som_abelhas)
+	container.add_child(check_som_abelhas)
 
 	# Botão Sair
 	var btn_sair := Button.new()
@@ -892,18 +1445,22 @@ func _criar_painel_licencas_menu_pausa(centro: CenterContainer) -> void:
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.custom_minimum_size = Vector2(680.0, 320.0)
+	scroll.mouse_filter = Control.MOUSE_FILTER_STOP
+	scroll.focus_mode = Control.FOCUS_ALL
 	conteudo.add_child(scroll)
 
 	var texto := RichTextLabel.new()
 	texto.name = "TextoLicencas"
 	texto.bbcode_enabled = false
-	texto.fit_content = false
+	texto.fit_content = true
 	texto.scroll_active = false
 	texto.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	texto.add_theme_font_size_override("normal_font_size", 18)
+	texto.add_theme_color_override("default_color", Color(0.33, 0.22, 0.0))
 	texto.text = TEXTO_LICENCAS_MENU
 	texto.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	texto.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	texto.size_flags_vertical = Control.SIZE_FILL
+	texto.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	scroll.add_child(texto)
 
 	var btn_voltar := Button.new()
@@ -957,6 +1514,12 @@ func _fechar_menu_pausa() -> void:
 	get_tree().paused = false
 
 
+## Callback do checkbox de som das abelhas; atualiza o flag global e salva.
+func _ao_alternar_som_abelhas(ativo: bool) -> void:
+	GerenciadorMundo.som_abelhas_ativo = ativo
+	GerenciadorMundo.salvar()
+
+
 ## Abre o painel de licenças e oculta o painel principal do menu de pausa.
 func _abrir_licencas_menu_pausa() -> void:
 	if _painel_menu_principal != null:
@@ -980,6 +1543,9 @@ func _painel_licencas_esta_aberto() -> bool:
 
 ## Encerra o jogo a partir do menu de pausa.
 func _sair_jogo() -> void:
+	_salvar_posicao_jogador()
+	_salvar_estado_ciclo_dia_noite()
+	GerenciadorMundo.salvar()
 	get_tree().paused = false
 	get_tree().quit()
 
@@ -987,10 +1553,17 @@ func _sair_jogo() -> void:
 ## Reseta todo o save e recarrega a cena do zero
 func _reiniciar_jogo() -> void:
 	# Reseta os dados globais
-	GerenciadorMundo.moedas = moedas_debug
+	GerenciadorMundo.moedas = 100
 	GerenciadorMundo.total_mel_coletado = 0
 	GerenciadorMundo.hexagonos_desbloqueados = []
 	GerenciadorMundo.estado_colmeias = {}
+	GerenciadorMundo.dia_atual = 1
+	GerenciadorMundo.tempo_ciclo_dia_noite = duracao_ciclo_dia_noite_segundos / 24.0
+	GerenciadorMundo.periodo_eh_dia = true
+	GerenciadorMundo.posicao_jogador = {}
+	GerenciadorMundo.conquistas = {}
+	GerenciadorMundo.som_abelhas_ativo = true
+	GerenciadorMundo.inventario_jogador = []
 
 	# Apaga o save do disco
 	if FileAccess.file_exists(GerenciadorMundo.CAMINHO_SAVE):

@@ -15,9 +15,6 @@ var _anim: AnimationPlayer  # AnimationPlayer encontrado recursivamente dentro d
 var inventario: Node = null  # Nó Inventario criado em _ready; outros scripts acessam via duck typing
 
 
-# --- ITEM NA MÃO ---
-var _ponto_da_mao: Node3D = null         # Nó 3D posicionado na mão direita do personagem
-var _modelo_na_mao_atual: Node3D = null  # Instância do modelo 3D do item atual; null se não houver
 
 
 # --- COMPRA DE HEX ---
@@ -31,6 +28,9 @@ var colmeia_proxima: Node = null  # Colmeia dentro da área de detecção; null 
 
 # --- INTERAÇÃO COM NPC ---
 var npc_proximo: Node = null  # NPC dentro da área de detecção; null se nenhum
+
+# --- INTERAÇÃO COM DESCANSO ---
+var ponto_descanso_proximo: Node = null  # Ponto de descanso da casa disponível para pular a noite
 
 
 # --- INTERAÇÃO COM TILE ---
@@ -46,6 +46,10 @@ var _barra_fill: MeshInstance3D = null  # Quad verde que cresce com o progresso
 var _largura_barra: float = 1.2         # Largura total da barra em unidades de mundo
 
 
+# --- DETECÇÃO DE TRAVAMENTO ---
+var _posicao_anterior: Vector3 = Vector3.ZERO  # Posição no frame anterior para detectar se está preso
+var _tempo_parado: float = 0.0                 # Acumulador de tempo sem se mover durante navegação
+
 # --- PARTÍCULAS ---
 var _poeira: GPUParticles3D = null  # Partículas de poeira durante o plantio
 
@@ -54,9 +58,16 @@ var _poeira: GPUParticles3D = null  # Partículas de poeira durante o plantio
 var _tween_inclinacao: Tween = null  # Tween que inclina o boneco enquanto planta
 
 
+## Offset vertical aplicado ao modelo para alinhar visualmente com o chão dos hex tiles
+const OFFSET_Y_MODELO: float = 0.35
+
+## Tempo máximo que o jogador pode ficar parado tentando navegar antes de desistir
+const TEMPO_MAX_PRESO: float = 0.8
+
 func _ready() -> void:
 	_nav.path_desired_distance = 0.4
 	_nav.target_desired_distance = 0.4
+	_model.position.y = OFFSET_Y_MODELO
 	_anim = _find_anim_player(_model)
 	_criar_inventario()
 	_criar_barra_progresso()
@@ -83,6 +94,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	# Tecla E (interagir): farm tile → colmeia → NPC → hex comprável (prioridade nessa ordem)
 	if event.is_action_pressed("interagir"):
 		_atualizar_hex_compravel_mais_proximo()
+		if ponto_descanso_proximo != null and ponto_descanso_proximo.has_method("tentar_descansar"):
+			if bool(ponto_descanso_proximo.tentar_descansar(self)):
+				return
 		if tile_atual != null:
 			_tentar_interagir()
 		elif colmeia_proxima != null:
@@ -107,18 +121,33 @@ func _physics_process(delta: float) -> void:
 
 	# Movimento normal via NavigationAgent
 	if not _nav.is_navigation_finished():
-		var next := _nav.get_next_path_position()
-		var diff := Vector3(next.x - global_position.x, 0.0, next.z - global_position.z)
-		if diff.length_squared() > 0.01:
-			var d := diff.normalized()
-			velocity.x = d.x * SPEED
-			velocity.z = d.z * SPEED
+		# Detecta se o jogador está preso (sem se mover por TEMPO_MAX_PRESO segundos)
+		var deslocamento := Vector3(global_position.x - _posicao_anterior.x, 0.0, global_position.z - _posicao_anterior.z)
+		if deslocamento.length_squared() < 0.001:
+			_tempo_parado += delta
 		else:
+			_tempo_parado = 0.0
+		_posicao_anterior = global_position
+
+		if _tempo_parado >= TEMPO_MAX_PRESO:
+			_nav.target_position = global_position
+			_tempo_parado = 0.0
 			velocity.x = 0.0
 			velocity.z = 0.0
+		else:
+			var next := _nav.get_next_path_position()
+			var diff := Vector3(next.x - global_position.x, 0.0, next.z - global_position.z)
+			if diff.length_squared() > 0.01:
+				var d := diff.normalized()
+				velocity.x = d.x * SPEED
+				velocity.z = d.z * SPEED
+			else:
+				velocity.x = 0.0
+				velocity.z = 0.0
 	else:
 		velocity.x = 0.0
 		velocity.z = 0.0
+		_tempo_parado = 0.0
 
 	var move_dir := Vector3(velocity.x, 0.0, velocity.z)
 	if move_dir.length_squared() > 0.01:
@@ -275,6 +304,16 @@ func _ao_sair_npc_area() -> void:
 	npc_proximo = null
 
 
+# Conectado ao sinal da casa quando o jogador entra na área de descanso noturno.
+func _ao_entrar_ponto_descanso(ponto: Node) -> void:
+	ponto_descanso_proximo = ponto
+
+
+# Conectado ao sinal da casa quando o jogador sai da área de descanso.
+func _ao_sair_ponto_descanso() -> void:
+	ponto_descanso_proximo = null
+
+
 # --- INVENTÁRIO ---
 
 # Cria o nó Inventario como filho do player
@@ -282,59 +321,6 @@ func _criar_inventario() -> void:
 	inventario = Inventario.new()
 	inventario.name = "Inventario"
 	add_child(inventario)
-
-
-# --- ITEM NA MÃO ---
-
-# Localiza o nó de mão dentro do model e armazena em _ponto_da_mao.
-# Busca por qualquer nó cujo nome contenha "hand" (case-insensitive).
-# Se não encontrar, cria um Node3D fallback com posição aproximada.
-func _criar_ponto_da_mao() -> void:
-	_ponto_da_mao = _find_node_by_name_part(_model, "hand")
-	if _ponto_da_mao != null:
-		return
-	# Fallback: nó manual se o modelo não tiver nó com "hand" no nome
-	push_warning("player.gd: nó 'hand' não encontrado no model — usando posição aproximada")
-	var fallback := Node3D.new()
-	fallback.name = "PontoDaMaoFallback"
-	fallback.position = Vector3(0.35, 0.85, 0.15)
-	add_child(fallback)
-	_ponto_da_mao = fallback
-
-
-# Busca recursivamente o primeiro nó cujo nome contenha 'parte' (sem distinção de maiúsculas)
-func _find_node_by_name_part(node: Node, parte: String) -> Node3D:
-	if node.name.to_lower().contains(parte.to_lower()):
-		if node is Node3D:
-			return node as Node3D
-	for child in node.get_children():
-		var resultado := _find_node_by_name_part(child, parte)
-		if resultado != null:
-			return resultado
-	return null
-
-
-# Chamado pelo sinal item_na_mao_mudou do Inventario
-# Remove o modelo anterior e instancia o novo modelo 3D do item
-func _ao_item_na_mao_mudado(novo_item: Item) -> void:
-	# Remove o modelo anterior se existir
-	if _modelo_na_mao_atual != null and is_instance_valid(_modelo_na_mao_atual):
-		_modelo_na_mao_atual.queue_free()
-		_modelo_na_mao_atual = null
-
-	# Se o novo item não tem modelo 3D, nada aparece na mão
-	if novo_item == null or novo_item.modelo_3d == null:
-		return
-
-	# Instancia o novo modelo e aplica tween de aparecimento
-	_modelo_na_mao_atual = novo_item.modelo_3d.instantiate() as Node3D
-	_modelo_na_mao_atual.scale = Vector3.ZERO  # Começa invisível
-	_ponto_da_mao.add_child(_modelo_na_mao_atual)
-
-	var tween := create_tween()
-	tween.tween_property(_modelo_na_mao_atual, "scale", Vector3.ONE, 0.2) \
-		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-
 
 # --- BARRA DE PROGRESSO ---
 
